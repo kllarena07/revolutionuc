@@ -21,7 +21,6 @@ interface CarbonData {
   renewable: number;
 }
 
-// Fix for Leaflet default icon issue in Next.js
 const DefaultIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
@@ -171,6 +170,7 @@ const CarbonFootprintDashboard = () => {
                 maxBoundsViscosity={1.0}
                 zoomControl={false}
                 attributionControl={false}
+                minZoom={4}
               >
                 <TileLayer
                   url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
