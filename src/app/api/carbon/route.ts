@@ -7,7 +7,7 @@ export async function GET() {
       {
         method: "GET",
         headers: {
-          "auth-token": "M0AjKIjkQUJLZwf7A3TG",
+          "auth-token": process.env.CALI_AUTH_TOKEN ||  "",
         },
       }
     );
