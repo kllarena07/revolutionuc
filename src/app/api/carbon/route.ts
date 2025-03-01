@@ -53,7 +53,16 @@ export async function GET() {
   try {
     // Wait for all fetch requests to resolve
     const results = await Promise.all(dataPromises);
-    return NextResponse.json(results); // Return the results as JSON
+
+    const lowest = results.reduce((min, current) => {
+      // Ensure `current.carbonIntensity` exists
+      if (current.carbonIntensity < min.carbonIntensity) {
+        return current; // Return the whole object if it has the lowest carbonIntensity
+      }
+      return min;
+    });
+
+    return NextResponse.json(lowest); // Return the results as JSON
   } catch (error) {
     console.error(error);
     return NextResponse.error(); // Return error if any fetch fails
