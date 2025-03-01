@@ -11,13 +11,8 @@ import {
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 // Environment variables to be set in Lambda configuration
-const {
-  TRAINING_JOB_NAME,
-  SOURCE_BUCKET,
-  DESTINATION_BUCKET,
-  DESTINATION_PREFIX,
-  REGION,
-} = process.env;
+const { SOURCE_BUCKET, DESTINATION_BUCKET, DESTINATION_PREFIX, REGION } =
+  process.env;
 
 // Create clients
 const sagemakerClient = new SageMakerClient({ region: REGION });
@@ -29,19 +24,21 @@ const lambdaClient = new LambdaClient({ region: REGION });
  */
 export const handler = async (event: any): Promise<any> => {
   try {
+    const jobName = event["jobName"];
+
     console.log(
       "Starting checkpoint extraction process for job:",
-      TRAINING_JOB_NAME
+      event.get(jobName)
     );
 
     // Step 1: Stop the training job to create the final checkpoint
-    await pauseTrainingJob(TRAINING_JOB_NAME as string);
+    await pauseTrainingJob(jobName);
 
     // Step 2: Wait for the training job to fully stop
-    await waitForJobToStop(TRAINING_JOB_NAME as string);
+    await waitForJobToStop(jobName);
 
     // Step 3: Get checkpoint location from the training job
-    const checkpointPath = await getCheckpointPath(TRAINING_JOB_NAME as string);
+    const checkpointPath = await getCheckpointPath(jobName);
 
     // Step 4: Copy checkpoint files to destination with FSx for Lustre
     await copyCheckpointFiles(checkpointPath);
@@ -50,7 +47,7 @@ export const handler = async (event: any): Promise<any> => {
       statusCode: 200,
       body: JSON.stringify({
         message: "Successfully paused training job and copied checkpoints",
-        jobName: TRAINING_JOB_NAME,
+        jobName: jobName,
         checkpointPath: checkpointPath,
         destinationBucket: DESTINATION_BUCKET,
         destinationPrefix: DESTINATION_PREFIX,
