@@ -1,6 +1,10 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+// @ts-ignore
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 interface ServerData {
   id: string;
@@ -16,6 +20,18 @@ interface CarbonData {
   optimized: number;
   renewable: number;
 }
+
+// Fix for Leaflet default icon issue in Next.js
+const DefaultIcon = L.icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
+L.Marker.prototype.options.icon = DefaultIcon;
 
 const CarbonFootprintDashboard = () => {
   const [modelSize, setModelSize] = useState('medium');
@@ -99,177 +115,190 @@ const CarbonFootprintDashboard = () => {
     return "bg-red-500";
   };
   
+  // Get Leaflet icon based on carbon intensity
+  const getIntensityIcon = (intensity: number) => {
+    let color = "#10B981"; // green
+    if (intensity >= 200 && intensity < 350) color = "#FBBF24"; // yellow
+    if (intensity >= 350 && intensity < 500) color = "#F97316"; // orange
+    if (intensity >= 500) color = "#EF4444"; // red
+    
+    return L.divIcon({
+      className: "custom-div-icon",
+      html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${intensity < 200 ? '✓' : ''}</div>`,
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+  };
+  
   // Find the greenest server
   const greenestServer = [...serverData].sort((a, b) => a.intensity - b.intensity)[0];
   
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      <header className="bg-white p-4 shadow-sm flex justify-between items-center">
+    <div className="h-screen flex flex-col bg-zinc-900 text-zinc-200">
+      <header className="bg-zinc-800 p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">EcoLLM: Green AI Training Platform</h1>
-          <p className="text-sm text-gray-600">Minimize the carbon footprint of your large language models</p>
+          <h1 className="text-xl font-bold text-zinc-100">EcoLLM: Green AI Training Platform</h1>
+          <p className="text-sm text-zinc-400">Minimize the carbon footprint of your large language models</p>
         </div>
         <div className="flex space-x-2">
           <button 
-            className={`px-3 py-1 rounded-md text-sm ${activeTab === 'map' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+            className={`px-3 py-1 rounded-md text-sm ${activeTab === 'map' ? 'bg-green-600 text-white' : 'bg-green-800 text-zinc-300'}`}
             onClick={() => setActiveTab('map')}
           >
             Global Map
           </button>
           <button 
-            className={`px-3 py-1 rounded-md text-sm ${activeTab === 'config' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+            className={`px-3 py-1 rounded-md text-sm ${activeTab === 'config' ? 'bg-green-600 text-white' : 'bg-green-800 text-zinc-300'}`}
             onClick={() => setActiveTab('config')}
           >
             Configuration
-          </button>
-          <button 
-            className={`px-3 py-1 rounded-md text-sm ${activeTab === 'scheduler' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
-            onClick={() => setActiveTab('scheduler')}
-          >
-            Scheduler
           </button>
         </div>
       </header>
       
       <div className="flex-1 overflow-hidden flex">
-        {/* Main Map Section */}
-        <div className={`flex-1 flex flex-col ${activeTab !== 'map' ? 'hidden md:flex' : ''}`}>
-          <div className="p-4 bg-white shadow-sm flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Global Server Carbon Intensity</h2>
-            <button 
-              className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md text-sm flex items-center"
-              onClick={fetchCarbonData}
-              disabled={isLoading}
-            >
-              {isLoading ? "Updating..." : "Refresh Data"}
-            </button>
-          </div>
-          
-          <div className="flex-1 relative bg-blue-50 overflow-hidden">
-            {/* World map visualization */}
-            <div className="absolute inset-0">
-              <img src="/api/placeholder/1200/800" alt="World Map" className="w-full h-full object-cover opacity-20" />
-              
-              {/* Server location markers - only render on client side */}
-              {isClient && serverData.map(server => (
-                <div 
-                  key={server.id} 
-                  className="absolute cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all hover:scale-125"
-                  style={{
-                    top: `${(90 - server.lat) / 180 * 100}%`,
-                    left: `${(180 + server.lng) / 360 * 100}%`,
-                  }}
-                  onClick={() => setSelectedServer(server)}
-                >
-                  <div className={`w-6 h-6 rounded-full ${getIntensityColor(server.intensity)} border-2 border-white flex items-center justify-center text-xs text-white font-bold`}>
-                    {server.intensity < 200 ? '✓' : ''}
-                  </div>
-                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1 bg-black bg-opacity-75 text-white text-xs py-1 px-2 rounded whitespace-nowrap">
-                    {server.name} ({server.intensity})
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          <div className="p-4 bg-white shadow-sm">
-            <div className="p-3 bg-green-50 rounded-lg mb-2">
-              <h3 className="font-medium mb-1">Recommended Server</h3>
-              {greenestServer && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium">{greenestServer.name}</span>
-                    <p className="text-sm text-gray-600">{greenestServer.provider}</p>
-                  </div>
-                  <div className="flex items-center">
-                    <div className={`w-3 h-3 rounded-full ${getIntensityColor(greenestServer.intensity)} mr-2`}></div>
-                    <span className="font-medium">{greenestServer.intensity} gCO<sub>2</sub>/kWh</span>
-                  </div>
-                  <button className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-md text-sm">
-                    Select Server
-                  </button>
-                </div>
-              )}
-            </div>
-            
-            {/* Selected server details */}
-            {selectedServer && (
-              <div className="p-3 border border-gray-200 rounded-lg bg-gray-50">
-                <div className="flex justify-between items-start">
-                  <h3 className="font-medium">{selectedServer.name} Details</h3>
-                  <button 
-                    className="text-gray-500"
-                    onClick={() => setSelectedServer(null)}
+        {/* Main content area with map and scheduler */}
+        <div className="flex-1 flex flex-col">
+          {/* Map Section - Takes 70% of the height when scheduler is active */}
+          <div className={`${activeTab === 'scheduler' ? 'h-[70%]' : 'h-full'} relative`}>
+            {isClient && (
+              <MapContainer 
+                center={[39.8283, -98.5795]} 
+                zoom={3} 
+                style={{ height: "100%", width: "100%" }}
+                scrollWheelZoom={true}
+                maxBounds={[[-60, -170], [75, 170]]}
+                maxBoundsViscosity={1.0}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors'
+                  url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
+                  noWrap={true}
+                />
+                {serverData.map(server => (
+                  <Marker 
+                    key={server.id} 
+                    position={[server.lat, server.lng]} 
+                    icon={getIntensityIcon(server.intensity)}
+                    eventHandlers={{
+                      click: () => {
+                        setSelectedServer(server);
+                      },
+                    }}
                   >
-                    ✕
-                  </button>
+                    {/* No Popup component here as we're showing details in the side panel */}
+                  </Marker>
+                ))}
+              </MapContainer>
+            )}
+            
+            {/* Map Controls Overlay */}
+            <div className="absolute top-4 right-4 z-[1000]">
+              <button 
+                className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm flex items-center shadow-lg"
+                onClick={fetchCarbonData}
+                disabled={isLoading}
+              >
+                {isLoading ? "Updating..." : "Refresh Data"}
+              </button>
+            </div>
+          </div>
+          
+          {/* Scheduler Section - Only visible when scheduler tab is active, takes 30% of height */}
+
+            <div className="h-[30%] bg-zinc-800 p-4 overflow-y-auto border-t border-zinc-700">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-lg font-semibold text-zinc-100">Green Scheduler</h2>
+                <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
+                  Schedule Training
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-medium mb-2 text-zinc-200 text-sm">Carbon Intensity Forecast</h3>
+                  <div className="h-20 bg-zinc-700 rounded-lg mb-1 relative">
+                    {/* Simple line chart representing 24-hour forecast */}
+                    <svg viewBox="0 0 24 100" className="w-full h-full">
+                      <polyline 
+                        points="0,70 1,65 2,60 3,62 4,50 5,45 6,40 7,45 8,50 9,55 10,60 11,50 12,45 13,50 14,55 15,65 16,70 17,75 18,70 19,65 20,60 21,55 22,50 23,45 24,40" 
+                        fill="none" 
+                        stroke="#10B981" 
+                        strokeWidth="2" 
+                      />
+                      <line x1="0" y1="0" x2="0" y2="100" stroke="#71717A" strokeWidth="1" />
+                      <line x1="0" y1="100" x2="24" y2="100" stroke="#71717A" strokeWidth="1" />
+                    </svg>
+                  </div>
+                  <div className="flex justify-between text-xs text-zinc-400">
+                    <span>Now</span>
+                    <span>12h</span>
+                    <span>24h</span>
+                  </div>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Provider</p>
-                    <p className="font-medium">{selectedServer.provider}</p>
+                
+                <div>
+                  <h3 className="font-medium mb-2 text-zinc-200 text-sm">Optimal Training Windows</h3>
+                  <div className="space-y-2">
+                    <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                      <div>
+                        <p className="font-medium text-xs text-zinc-200">Today, 3:00 AM - 7:00 AM</p>
+                        <p className="text-xs text-zinc-400">EU North (Stockholm)</p>
+                      </div>
+                      <div className="text-green-400 font-medium text-xs">115 gCO<sub>2</sub>/kWh</div>
+                    </div>
+                    
+                    <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                      <div>
+                        <p className="font-medium text-xs text-zinc-200">Tomorrow, 2:00 AM - 6:00 AM</p>
+                        <p className="text-xs text-zinc-400">US West (Oregon)</p>
+                      </div>
+                      <div className="text-green-400 font-medium text-xs">130 gCO<sub>2</sub>/kWh</div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Carbon Intensity</p>
-                    <p className="font-medium">{selectedServer.intensity} gCO<sub>2</sub>/kWh</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Location</p>
-                    <p className="font-medium">{selectedServer.lat.toFixed(2)}, {selectedServer.lng.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Estimated Savings</p>
-                    <p className="font-medium text-green-600">
-                      {Math.round((550 - selectedServer.intensity) / 5.5)}% vs. worst region
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <button className="w-full bg-green-500 hover:bg-green-600 text-white py-1 rounded-md text-sm">
-                    Schedule Training on This Server
-                  </button>
                 </div>
               </div>
-            )}
-          </div>
+              
+            
+            </div>
         </div>
         
-        {/* Side Panel */}
-        <div className={`w-full md:w-96 bg-white shadow-lg overflow-y-auto ${activeTab === 'map' ? 'hidden md:block' : ''}`}>
+        {/* Side Panel - Always visible on desktop */}
+        <div className="hidden md:block w-96 bg-zinc-800 shadow-lg overflow-y-auto">
           {activeTab === 'config' && (
             <div className="p-4">
-              <h2 className="text-lg font-semibold mb-4">Model Configuration</h2>
+              <h2 className="text-lg font-semibold mb-4 text-zinc-100">Model Configuration</h2>
               
               {/* Carbon Footprint Overview */}
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-medium">Carbon Footprint</h3>
-                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
+                  <h3 className="font-medium text-zinc-200">Carbon Footprint</h3>
+                  <span className="bg-green-900 text-green-300 px-2 py-1 rounded-full text-xs font-medium">
                     {savingsPercentage}% Reduction
                   </span>
                 </div>
                 
                 <div className="flex space-x-2 mb-2">
-                  <div className="flex-1 bg-red-50 p-2 rounded-lg text-center">
-                    <p className="text-red-600 text-xs">Standard</p>
-                    <p className="text-sm font-bold">{currentData.baseline} kg</p>
+                  <div className="flex-1 bg-red-900 p-2 rounded-lg text-center">
+                    <p className="text-red-300 text-xs">Standard</p>
+                    <p className="text-sm font-bold text-red-200">{currentData.baseline} kg</p>
                   </div>
-                  <div className="flex-1 bg-yellow-50 p-2 rounded-lg text-center">
-                    <p className="text-yellow-600 text-xs">Optimized</p>
-                    <p className="text-sm font-bold">{currentData.optimized} kg</p>
+                  <div className="flex-1 bg-yellow-900 p-2 rounded-lg text-center">
+                    <p className="text-yellow-300 text-xs">Optimized</p>
+                    <p className="text-sm font-bold text-yellow-200">{currentData.optimized} kg</p>
                   </div>
-                  <div className="flex-1 bg-green-50 p-2 rounded-lg text-center">
-                    <p className="text-green-600 text-xs">Green Energy</p>
-                    <p className="text-sm font-bold">{currentData.renewable} kg</p>
+                  <div className="flex-1 bg-green-900 p-2 rounded-lg text-center">
+                    <p className="text-green-300 text-xs">Green Energy</p>
+                    <p className="text-sm font-bold text-green-200">{currentData.renewable} kg</p>
                   </div>
                 </div>
               </div>
               
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">Model Size</label>
+                  <label className="block text-sm text-zinc-400 mb-1">Model Size</label>
                   <select 
-                    className="w-full p-2 border rounded-md"
+                    className="w-full p-2 border rounded-md bg-zinc-700 border-zinc-600 text-zinc-200"
                     value={modelSize}
                     onChange={(e) => setModelSize(e.target.value)}
                   >
@@ -280,9 +309,9 @@ const CarbonFootprintDashboard = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">Training Location</label>
+                  <label className="block text-sm text-zinc-400 mb-1">Training Location</label>
                   <select 
-                    className="w-full p-2 border rounded-md"
+                    className="w-full p-2 border rounded-md bg-zinc-700 border-zinc-600 text-zinc-200"
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                   >
@@ -293,12 +322,12 @@ const CarbonFootprintDashboard = () => {
                 </div>
                 
                 <div>
-                  <h3 className="text-sm text-gray-600 mb-1">Optimizations</h3>
+                  <h3 className="text-sm text-zinc-400 mb-1">Optimizations</h3>
                   <div className="space-y-1">
                     <label className="flex items-center">
                       <input 
                         type="checkbox" 
-                        className="mr-2"
+                        className="mr-2 bg-zinc-700 border-zinc-600"
                         checked={optimizations.includes('quantization')}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -308,13 +337,13 @@ const CarbonFootprintDashboard = () => {
                           }
                         }}
                       />
-                      <span className="text-sm">Quantization (8-bit)</span>
+                      <span className="text-sm text-zinc-300">Quantization (8-bit)</span>
                     </label>
                     
                     <label className="flex items-center">
                       <input 
                         type="checkbox" 
-                        className="mr-2"
+                        className="mr-2 bg-zinc-700 border-zinc-600"
                         checked={optimizations.includes('pruning')}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -324,13 +353,13 @@ const CarbonFootprintDashboard = () => {
                           }
                         }}
                       />
-                      <span className="text-sm">Weight Pruning</span>
+                      <span className="text-sm text-zinc-300">Weight Pruning</span>
                     </label>
                     
                     <label className="flex items-center">
                       <input 
                         type="checkbox" 
-                        className="mr-2"
+                        className="mr-2 bg-zinc-700 border-zinc-600"
                         checked={optimizations.includes('distillation')}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -340,13 +369,13 @@ const CarbonFootprintDashboard = () => {
                           }
                         }}
                       />
-                      <span className="text-sm">Knowledge Distillation</span>
+                      <span className="text-sm text-zinc-300">Knowledge Distillation</span>
                     </label>
                     
                     <label className="flex items-center">
                       <input 
                         type="checkbox" 
-                        className="mr-2"
+                        className="mr-2 bg-zinc-700 border-zinc-600"
                         checked={optimizations.includes('mixedprecision')}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -356,15 +385,15 @@ const CarbonFootprintDashboard = () => {
                           }
                         }}
                       />
-                      <span className="text-sm">Mixed Precision Training</span>
+                      <span className="text-sm text-zinc-300">Mixed Precision Training</span>
                     </label>
                   </div>
                 </div>
                 
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">Early Stopping Patience</label>
-                  <input type="range" className="w-full" min="1" max="10" defaultValue="3" />
-                  <div className="flex justify-between text-xs text-gray-500">
+                  <label className="block text-sm text-zinc-400 mb-1">Early Stopping Patience</label>
+                  <input type="range" className="w-full bg-zinc-700" min="1" max="10" defaultValue="3" />
+                  <div className="flex justify-between text-xs text-zinc-400">
                     <span>Aggressive</span>
                     <span>Balanced</span>
                     <span>Conservative</span>
@@ -374,106 +403,96 @@ const CarbonFootprintDashboard = () => {
             </div>
           )}
           
-          {activeTab === 'scheduler' && (
-            <div className="p-4">
-              <h2 className="text-lg font-semibold mb-4">Green Scheduler</h2>
-              
-              <div className="mb-4">
-                <h3 className="font-medium mb-2">Carbon Intensity Forecast (24h)</h3>
-                <div className="h-32 bg-gray-100 rounded-lg mb-2 relative">
-                  {/* Simple line chart representing 24-hour forecast */}
-                  <svg viewBox="0 0 24 100" className="w-full h-full">
-                    <polyline 
-                      points="0,70 1,65 2,60 3,62 4,50 5,45 6,40 7,45 8,50 9,55 10,60 11,50 12,45 13,50 14,55 15,65 16,70 17,75 18,70 19,65 20,60 21,55 22,50 23,45 24,40" 
-                      fill="none" 
-                      stroke="#10B981" 
-                      strokeWidth="2" 
-                    />
-                    <line x1="0" y1="0" x2="0" y2="100" stroke="#CBD5E1" strokeWidth="1" />
-                    <line x1="0" y1="100" x2="24" y2="100" stroke="#CBD5E1" strokeWidth="1" />
-                  </svg>
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Now</span>
-                  <span>6h</span>
-                  <span>12h</span>
-                  <span>18h</span>
-                  <span>24h</span>
-                </div>
-              </div>
-              
-              <div className="mb-4">
-                <h3 className="font-medium mb-2">Optimal Training Windows</h3>
-                <div className="space-y-2">
-                  <div className="p-2 bg-green-50 border border-green-200 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-sm">Today, 3:00 AM - 7:00 AM</p>
-                      <p className="text-xs text-gray-600">EU North (Stockholm)</p>
-                    </div>
-                    <div className="text-green-600 font-medium text-sm">115 gCO<sub>2</sub>/kWh</div>
-                  </div>
-                  
-                  <div className="p-2 bg-green-50 border border-green-200 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-sm">Tomorrow, 2:00 AM - 6:00 AM</p>
-                      <p className="text-xs text-gray-600">US West (Oregon)</p>
-                    </div>
-                    <div className="text-green-600 font-medium text-sm">130 gCO<sub>2</sub>/kWh</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div>
-                <h3 className="font-medium mb-2">Scheduling Options</h3>
-                <div className="space-y-2">
-                  <label className="flex items-center">
-                    <input type="radio" name="schedule" className="mr-2" defaultChecked />
-                    <span className="text-sm">Optimize for lowest carbon intensity</span>
-                  </label>
-                  
-                  <label className="flex items-center">
-                    <input type="radio" name="schedule" className="mr-2" />
-                    <span className="text-sm">Balance carbon and training speed</span>
-                  </label>
-                  
-                  <label className="flex items-center">
-                    <input type="radio" name="schedule" className="mr-2" />
-                    <span className="text-sm">Optimize for fastest completion</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-          
           {activeTab === 'map' && (
             <div className="p-4">
-              <h2 className="text-lg font-semibold mb-4">Server List</h2>
-              <div className="overflow-hidden rounded-lg border border-gray-200">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+              <h2 className="text-lg font-semibold mb-4 text-zinc-100">Server List</h2>
+              
+              {/* Selected server details - Integrated from popup */}
+              {selectedServer && (
+                <div className="p-3 border border-zinc-700 rounded-lg bg-zinc-700 mb-4">
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-medium text-zinc-200">{selectedServer.name} Details</h3>
+                    <button 
+                      className="text-zinc-400"
+                      onClick={() => setSelectedServer(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-zinc-400">Provider</p>
+                      <p className="font-medium text-zinc-200">{selectedServer.provider}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-zinc-400">Carbon Intensity</p>
+                      <p className="font-medium text-zinc-200">{selectedServer.intensity} gCO<sub>2</sub>/kWh</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-zinc-400">Location</p>
+                      <p className="font-medium text-zinc-200">{selectedServer.lat.toFixed(2)}, {selectedServer.lng.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-zinc-400">Estimated Savings</p>
+                      <p className="font-medium text-green-500">
+                        {Math.round((550 - selectedServer.intensity) / 5.5)}% vs. worst region
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <button className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm">
+                      Schedule Training on This Server
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {/* Recommended server section */}
+              <div className="p-3 bg-zinc-700 rounded-lg mb-4">
+                <h3 className="font-medium mb-1 text-zinc-200">Recommended Server</h3>
+                {greenestServer && (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-zinc-200">{greenestServer.name}</span>
+                      <p className="text-sm text-zinc-400">{greenestServer.provider}</p>
+                    </div>
+                    <div className="flex items-center">
+                      <div className={`w-3 h-3 rounded-full ${getIntensityColor(greenestServer.intensity)} mr-2`}></div>
+                      <span className="font-medium text-zinc-200">{greenestServer.intensity} gCO<sub>2</sub>/kWh</span>
+                    </div>
+                    <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
+                      Select Server
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              <div className="overflow-hidden rounded-lg border border-zinc-700">
+                <table className="min-w-full divide-y divide-zinc-700">
+                  <thead className="bg-zinc-700">
                     <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Carbon</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Location</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Provider</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Carbon</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-zinc-800 divide-y divide-zinc-700">
                     {serverData.sort((a, b) => a.intensity - b.intensity).map(server => (
                       <tr 
                         key={server.id} 
-                        className={`${selectedServer?.id === server.id ? "bg-blue-50" : ""} cursor-pointer hover:bg-gray-50`}
+                        className={`${selectedServer?.id === server.id ? "bg-zinc-700" : ""} cursor-pointer hover:bg-zinc-700`}
                         onClick={() => setSelectedServer(server)}
                       >
                         <td className="px-3 py-2 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{server.name}</div>
+                          <div className="text-sm font-medium text-zinc-200">{server.name}</div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          <div className="text-sm text-gray-500">{server.provider}</div>
+                          <div className="text-sm text-zinc-400">{server.provider}</div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className={`w-3 h-3 rounded-full ${getIntensityColor(server.intensity)} mr-2`}></div>
-                            <div className="text-sm text-gray-900">{server.intensity}</div>
+                            <div className="text-sm text-zinc-200">{server.intensity}</div>
                           </div>
                         </td>
                       </tr>
@@ -484,7 +503,7 @@ const CarbonFootprintDashboard = () => {
             </div>
           )}
           
-          <div className="p-4 border-t">
+          <div className="p-4 border-t border-zinc-700">
             <button className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md">
               Start Optimized Training
             </button>
