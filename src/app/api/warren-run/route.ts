@@ -105,7 +105,7 @@ pip install nbconvert ipykernel matplotlib scikit-learn boto3 awscli
 # Set up environment variables from the SageMaker job
 JOB_ID=$(echo $AWS_PROCESSING_JOB_NAME | cut -d'-' -f3-)
 S3_BUCKET="${BUCKET_NAME}"
-S3_LOG_PATH="s3://$S3_BUCKET/logs/$JOB_ID"
+S3_LOG_PREFIX="logs/${jobId}"
 LOCAL_LOG_FILE="/tmp/notebook_output.log"
 
 # Set up output directory
@@ -118,7 +118,7 @@ NOTEBOOK_FILE=$(find $NOTEBOOK_DIR -name "*.ipynb" | head -1)
 
 if [ -z "$NOTEBOOK_FILE" ]; then
   echo "Error: No notebook file found in $NOTEBOOK_DIR" | tee -a $LOCAL_LOG_FILE
-  aws s3 cp $LOCAL_LOG_FILE $S3_LOG_PATH/execution.log
+  aws s3 cp $LOCAL_LOG_FILE s3://$S3_BUCKET/$S3_LOG_PREFIX/execution.log
   exit 1
 fi
 
@@ -126,7 +126,8 @@ echo "Using notebook file: $NOTEBOOK_FILE" | tee -a $LOCAL_LOG_FILE
 
 # Function to upload logs to S3 in real-time
 upload_logs() {
-  aws s3 cp $LOCAL_LOG_FILE $S3_LOG_PATH/execution.log
+  # Use a fixed path structure to avoid nesting issues
+  aws s3 cp $LOCAL_LOG_FILE s3://$S3_BUCKET/$S3_LOG_PREFIX/execution.log
 }
 
 # Upload initial log
@@ -164,10 +165,11 @@ find /tmp -type f -name "*.png" -o -name "*.csv" -o -name "*.json" | while read 
   cp "$file" $OUTPUT_DIR/
 done
 
-# Sync all outputs to S3
-aws s3 sync $OUTPUT_DIR $S3_LOG_PATH/outputs/
+# FIXED: Use a flat structure for outputs - don't nest under /outputs/
+# Instead put directly in the jobId folder to prevent nesting
+aws s3 sync $OUTPUT_DIR s3://$S3_BUCKET/$S3_LOG_PREFIX/
 
-echo "Notebook execution completed. Logs available at $S3_LOG_PATH" | tee -a $LOCAL_LOG_FILE
+echo "Notebook execution completed. Logs available at s3://$S3_BUCKET/$S3_LOG_PREFIX/execution.log" | tee -a $LOCAL_LOG_FILE
 upload_logs
 
 exit 0

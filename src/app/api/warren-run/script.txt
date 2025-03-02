@@ -212,13 +212,12 @@ find /tmp -type f -name "*.png" -o -name "*.csv" -o -name "*.json" | while read 
 done
 
 # Upload all output files to S3
-aws s3 sync $OUTPUT_DIR s3://$S3_BUCKET/$S3_PREFIX/outputs/
+aws s3 sync $OUTPUT_DIR s3://$S3_BUCKET/$S3_PREFIX/
 
 echo "All outputs uploaded to S3://$S3_BUCKET/$S3_PREFIX/" | tee -a $LOG_FILE
 upload_log
 
 exit 0
-
 #!/bin/bash
 
 set -e
@@ -336,7 +335,11 @@ from nbconvert.preprocessors import ExecutePreprocessor
 
 try:
     import boto3
-except ImportE# Find the notebook file
+except ImportError:
+    print("boto3 is not installed. Please install it to use this script.")
+    sys.exit(1)
+
+# Find the notebook file
 notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
 if not notebook_files:
     update_s3_log("No notebook files found in input directory", status="FAILED")
@@ -388,6 +391,7 @@ def capture_output():
             update_s3_log(f"STDOUT: {stdout_value.strip()}")
         if stderr_value:
             update_s3_log(f"STDERR: {stderr_value.strip()}")
+
 try:
     # Load the notebook
     print("Loading notebook...")
@@ -420,3 +424,4 @@ except Exception as e:
     sys.exit(1)
 
 print("Conversion complete")
+

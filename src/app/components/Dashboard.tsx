@@ -1609,14 +1609,14 @@ const CarbonFootprintDashboard = () => {
                                         <div className="mt-3 border-t border-zinc-600 pt-2">
                       <NotebookUploader compact={true} />
                     </div>
-                    <div className="mt-2">
+                    {/* <div className="mt-2">
                       <button 
                         className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm"
                         onClick={handleScheduleTraining}
                       >
                         Schedule Training on This Server
                       </button>
-                    </div>
+                    </div> */}
                     
 
                   </motion.div>
