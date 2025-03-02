@@ -1,12 +1,13 @@
-import { 
-  SageMakerClient, 
+import {
+  SageMakerClient,
   CreateNotebookInstanceCommand,
   StartNotebookInstanceCommand,
   CreatePresignedNotebookInstanceUrlCommand,
   DescribeNotebookInstanceCommand,
-  DeleteNotebookInstanceCommand
-} from '@aws-sdk/client-sagemaker';
-import { SageMakerConfig } from './types';
+  DeleteNotebookInstanceCommand,
+  CreateNotebookInstanceInput,
+} from "@aws-sdk/client-sagemaker";
+import { SageMakerConfig } from "./types";
 
 export class SageMakerService {
   private client: SageMakerClient;
@@ -21,38 +22,39 @@ export class SageMakerService {
     await this.client.send(
       new CreateNotebookInstanceCommand({
         NotebookInstanceName: notebookName,
-        InstanceType: this.config.instanceType,
+        InstanceType: this.config
+          .instanceType as CreateNotebookInstanceInput["InstanceType"],
         RoleArn: this.config.roleArn,
         DefaultCodeRepository: `s3://${this.config.s3BucketName}`,
-        DirectInternetAccess: 'Enabled'
+        DirectInternetAccess: "Enabled",
       })
     );
-    
+
     // Wait for the notebook instance to be in 'InService' state
-    let status = '';
+    let status = "";
     do {
       const response = await this.client.send(
         new DescribeNotebookInstanceCommand({
-          NotebookInstanceName: notebookName
+          NotebookInstanceName: notebookName,
         })
       );
-      
-      status = response.NotebookInstanceStatus || '';
-      
-      if (status === 'Failed') {
-        throw new Error('Notebook instance creation failed');
+
+      status = response.NotebookInstanceStatus || "";
+
+      if (status === "Failed") {
+        throw new Error("Notebook instance creation failed");
       }
-      
-      if (status !== 'InService') {
+
+      if (status !== "InService") {
         // Wait 15 seconds before checking again
-        await new Promise(resolve => setTimeout(resolve, 15000));
+        await new Promise((resolve) => setTimeout(resolve, 15000));
       }
-    } while (status !== 'InService');
-    
+    } while (status !== "InService");
+
     // Start the notebook instance
     await this.client.send(
       new StartNotebookInstanceCommand({
-        NotebookInstanceName: notebookName
+        NotebookInstanceName: notebookName,
       })
     );
   }
@@ -60,19 +62,18 @@ export class SageMakerService {
   async getNotebookUrl(notebookName: string): Promise<string> {
     const response = await this.client.send(
       new CreatePresignedNotebookInstanceUrlCommand({
-        NotebookInstanceName: notebookName
+        NotebookInstanceName: notebookName,
       })
     );
-    
-    return response.AuthorizedUrl || '';
+
+    return response.AuthorizedUrl || "";
   }
 
   async deleteNotebookInstance(notebookName: string): Promise<void> {
     await this.client.send(
       new DeleteNotebookInstanceCommand({
-        NotebookInstanceName: notebookName
+        NotebookInstanceName: notebookName,
       })
     );
   }
 }
-
