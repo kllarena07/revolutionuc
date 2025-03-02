@@ -7,14 +7,18 @@ interface TokenZonePair {
 
 const apiKeys = {
   CALI_AUTH_TOKEN: process.env.CALI_AUTH_TOKEN as string,
-  NY_AUTH_TOKEN: process.env.NY_AUTH_TOKEN as string,
-  NEWMEX_AUTH_TOKEN: process.env.NEWMEX_AUTH_TOKEN as string,
+  VA_AUTH_TOKEN: process.env.VA_AUTH_TOKEN as string,
+  OREGON_AUTH_TOKEN: process.env.OREGON_AUTH_TOKEN as string,
+  HK_AUTH_TOKEN: process.env.HK_AUTH_TOKEN as string,
+  GB_AUTH_TOKEN: process.env.GB_AUTH_TOKEN as string,
 };
 
 const zones = {
-  CALI_ZONE: "US-CAL-CISO",
-  NY_ZONE: "US-NY-NYIS",
-  NEWMEX_ZONE: "US-SW-PNM",
+  CALI_ZONE: "US-CAL-CISO", // California
+  VA_ZONE: "US-MIDA-PJM", // Virginia
+  OREGON_ZONE: "US-NW-PACW", // Oregon
+  HK_ZONE: "HK", // Hong Kong
+  GB_ZONE: "GB", // Great Britain
 };
 
 async function fetchCarbonIntensity(token: string, zone: string) {
