@@ -66,7 +66,7 @@ async function fetchRegionData(region: string): Promise<TransformedHistoryItem[]
   const cachedData = await redis.get<TransformedHistoryItem[]>(cacheKey)
   
   if (cachedData) {
-    console.log(`Returning cached CO2 intensity data for ${region}`)
+    // console.log(`Returning cached CO2 intensity data for ${region}`)
     return cachedData
   }
   

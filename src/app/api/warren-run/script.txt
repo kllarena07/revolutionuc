@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+import os
+import sys
+import traceback
+import nbformat
+from nbconvert.preprocessors import ExecutePreprocessor
+
+# Configure paths
+input_dir = '/opt/ml/processing/input/notebook'
+output_dir = '/opt/ml/processing/output'
+os.makedirs(output_dir, exist_ok=True)
+
+# Set up logging
+log_file = os.path.join(output_dir, 'execution_log.txt')
+
+def log_message(message):
+    print(message)
+    with open(log_file, 'a') as f:
+        f.write(f"{message}\n")
+
+log_message("Starting notebook execution")
+
+# Find the notebook file
+notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
+if not notebook_files:
+    log_message("No notebook files found in input directory")
+    sys.exit(1)
+
+notebook_file = notebook_files[0]
+input_path = os.path.join(input_dir, notebook_file)
+log_message(f"Found notebook: {input_path}")
+
+try:
+    # Load the notebook
+    log_message("Loading notebook...")
+    with open(input_path) as f:
+        nb = nbformat.read(f, as_version=4)
+    
+    # Set up kernel spec
+    if 'metadata' not in nb:
+        nb['metadata'] = {}
+    nb['metadata']['kernelspec'] = {
+        'display_name': 'Python 3',
+        'language': 'python',
+        'name': 'python3'
+    }
+    
+    # Execute notebook
+    log_message("Executing notebook...")
+    ep = ExecutePreprocessor(timeout=1800, kernel_name='python3')
+    ep.preprocess(nb, {'metadata': {'path': '.'}})
+    
+    # Save executed notebook
+    output_notebook = os.path.join(output_dir, notebook_file)
+    with open(output_notebook, 'w', encoding='utf-8') as f:
+        nbformat.write(nb, f)
+    
+    log_message(f"Notebook execution completed successfully and saved to: {output_notebook}")
+    
+except Exception as e:
+    error_message = f"Error executing notebook: {str(e)}"
+    log_message(error_message)
+    
+    # Try to save the partial results
+    try:
+        output_notebook = os.path.join(output_dir, f"partial_{notebook_file}")
+        with open(output_notebook, 'w', encoding='utf-8') as f:
+            nbformat.write(nb, f)
+        log_message(f"Saved partial results to {output_notebook}")
+    except Exception as save_error:
+        log_message(f"Could not save partial results: {str(save_error)}")
+    
+    # Create detailed error log
+    error_log = os.path.join(output_dir, 'error_details.txt')
+    with open(error_log, 'w') as f:
+        f.write(traceback.format_exc())
+    
+    sys.exit(1)
+
+# Create additional diagnostics for debugging
+log_message("Creating diagnostics...")
+
+# Save environment variables
+try:
+    env_file = os.path.join(output_dir, 'environment.txt')
+    with open(env_file, 'w') as f:
+        f.write("Container environment:\n")
+        for key, value in os.environ.items():
+            f.write(f"{key}={value}\n")
+    log_message("Environment variables saved")
+except Exception as e:
+    log_message(f"Error saving environment variables: {str(e)}")
+
+# Save package list
+try:
+    import subprocess
+    packages_file = os.path.join(output_dir, 'packages.txt')
+    with open(packages_file, 'w') as f:
+        f.write("Installed Python packages:\n")
+        result = subprocess.run(['pip', 'list'], capture_output=True, text=True)
+        f.write(result.stdout)
+    log_message("Package list saved")
+except Exception as e:
+    log_message(f"Error saving package list: {str(e)}")
+
+# Save notebook metadata
+try:
+    meta_file = os.path.join(output_dir, 'notebook_metadata.txt')
+    with open(meta_file, 'w') as f:
+        f.write("Notebook metadata:\n")
+        for key, value in nb.get('metadata', {}).items():
+            f.write(f"{key}: {value}\n")
+    log_message("Notebook metadata saved")
+except Exception as e:
+    log_message(f"Error saving notebook metadata: {str(e)}")
+
+log_message("Execution complete")

@@ -1,26 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
+import React, { useState, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import { motion, AnimatePresence, animate } from 'framer-motion';
 
-const MapContainer = dynamic(
-  () => import("react-leaflet").then((mod) => mod.MapContainer),
-  { ssr: false }
-);
-
-const TileLayer = dynamic(
-  () => import("react-leaflet").then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-
-const Marker = dynamic(
-  () => import("react-leaflet").then((mod) => mod.Marker),
-  { ssr: false }
-);
-
-const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), {
-  ssr: false,
-});
 
 // Import Leaflet only on client-side
 let L: any;
@@ -64,47 +47,46 @@ interface GeoJSONFeature {
   };
 }
 
+// Training job state interfaces
+interface TrainingJob {
+  jobId?: string;
+  jobName?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  outputs?: Array<{key: string, size: number}>;
+  failureReason?: string;
+  logInfo?: {url: string};
+}
+
 // Create a wrapper component for the map to handle the Leaflet-specific props
-const MapWrapper = ({
-  children,
-  selectedServer,
-  isClientSide,
-}: {
-  children: React.ReactNode;
-  selectedServer: ServerData | null;
-  isClientSide: boolean;
+const MapWrapper = ({ children, selectedServer, isClientSide }: { 
+  children: React.ReactNode, 
+  selectedServer: ServerData | null,
+  isClientSide: boolean 
 }) => {
-  if (!isClientSide) return null;
-
+   if (!isClientSide) return null;
+  
   // We need to use require here to avoid SSR issues
-  const {
-    MapContainer,
-    TileLayer,
-    GeoJSON,
-    Marker,
-    useMap,
-  } = require("react-leaflet");
-
+  const { MapContainer, TileLayer, GeoJSON, Marker, useMap } = require('react-leaflet');
+  
   // Create an internal MapController component that uses the useMap hook
-  const MapController = ({
-    selectedServer,
-  }: {
-    selectedServer: ServerData | null;
-  }) => {
+  const MapController = ({ selectedServer }: { selectedServer: ServerData | null }) => {
     const map = useMap();
-
+    
     useEffect(() => {
       if (selectedServer && map) {
-        map.setView([selectedServer.lat, selectedServer.lng], 4, {
-          animate: true,
-          duration: 1.5,
-        });
+        map.setView(
+          [selectedServer.lat, selectedServer.lng], 
+          4, 
+          { animate: true, duration: 1.5 }
+        );
       }
     }, [selectedServer, map]);
-
+    
     return null;
   };
-
+  
   return (
     <MapContainer
       center={[39.8283, -98.5795]}
@@ -120,10 +102,12 @@ const MapWrapper = ({
       attributionControl={false}
       minZoom={2}
     >
-      <TileLayer url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png" />
-
+      <TileLayer
+        url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
+      />
+      
       {selectedServer && <MapController selectedServer={selectedServer} />}
-
+      
       {children}
     </MapContainer>
   );
@@ -135,53 +119,14 @@ const CarbonFootprintDashboard = () => {
   const [optimizations, setOptimizations] = useState<string[]>([
     "quantization",
     "pruning",
+    "distillation",
   ]);
   const [serverData, setServerData] = useState<ServerData[]>([
-    {
-      id: "us-east",
-      name: "US East (Virginia)",
-      lat: 38.9072,
-      lng: -77.0369,
-      intensity: 420,
-      provider: "AWS",
-      zone: "US-MIDA-PJM",
-    },
-    {
-      id: "us-west",
-      name: "US West (California)",
-      lat: 37.7749,
-      lng: -122.4194,
-      intensity: 320,
-      provider: "AWS",
-      zone: "US-CAL-CISO",
-    },
-    {
-      id: "us-northwest",
-      name: "US Northwest (Oregon)",
-      lat: 45.5051,
-      lng: -122.675,
-      intensity: 280,
-      provider: "AWS",
-      zone: "US-NW-PACW",
-    },
-    {
-      id: "eu-west",
-      name: "EU West (London)",
-      lat: 51.5074,
-      lng: -0.1278,
-      intensity: 210,
-      provider: "AWS",
-      zone: "GB",
-    },
-    {
-      id: "asia-east",
-      name: "Asia East (Hong Kong)",
-      lat: 22.3193,
-      lng: 114.1694,
-      intensity: 550,
-      provider: "AWS",
-      zone: "HK",
-    },
+    { id: 'us-east', name: 'US East (Virginia)', lat: 38.9072, lng: -77.0369, intensity: 420, provider: 'AWS', zone: 'US-MIDA-PJM' },
+    { id: 'us-west', name: 'US West (California)', lat: 37.7749, lng: -122.4194, intensity: 320, provider: 'AWS', zone: 'US-CAL-CISO' },
+    { id: 'us-northwest', name: 'US Northwest (Oregon)', lat: 45.5051, lng: -122.6750, intensity: 280, provider: 'AWS', zone: 'US-NW-PACW' },
+    { id: 'eu-west', name: 'EU West (London)', lat: 51.5074, lng: -0.1278, intensity: 210, provider: 'AWS', zone: 'GB' },
+    { id: 'asia-east', name: 'Asia East (Hong Kong)', lat: 22.3193, lng: 114.1694, intensity: 550, provider: 'AWS', zone: 'HK' }
   ]);
   const [selectedServer, setSelectedServer] = useState<ServerData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -191,52 +136,53 @@ const CarbonFootprintDashboard = () => {
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
 
   const [forecastData, setForecastData] = useState<ForecastData[]>([]);
-
+  
   // Create DefaultIcon only on client side
   const [defaultIcon, setDefaultIcon] = useState<any>(null);
 
   // Add new state for animation and live data simulation
   const [isLiveMode, setIsLiveMode] = useState(true); // Set to true by default
-  const [liveUpdateInterval, setLiveUpdateInterval] =
-    useState<NodeJS.Timeout | null>(null);
-  const [dataUpdateTimestamp, setDataUpdateTimestamp] = useState<Date | null>(
-    null
-  );
-  const [animatedIntensity, setAnimatedIntensity] = useState<number | null>(
-    null
-  );
-
+  const [liveUpdateInterval, setLiveUpdateInterval] = useState<NodeJS.Timeout | null>(null);
+  const [dataUpdateTimestamp, setDataUpdateTimestamp] = useState<Date | null>(null);
+  const [animatedIntensity, setAnimatedIntensity] = useState<number | null>(null);
+  
   // Add new state for idle animations
   const [animationTimestamp, setAnimationTimestamp] = useState(new Date());
   const [randomMetrics, setRandomMetrics] = useState({
     cpuUsage: Math.floor(Math.random() * 30) + 10,
     memoryUsage: Math.floor(Math.random() * 40) + 30,
-    networkTraffic: Math.floor(Math.random() * 50) + 20,
+    networkTraffic: Math.floor(Math.random() * 50) + 20
   });
+  
+  // Training job and upload modal state
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [trainingFile, setTrainingFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [trainingJob, setTrainingJob] = useState<TrainingJob | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusInterval, setStatusInterval] = useState<NodeJS.Timeout | null>(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (statusInterval) {
+        clearInterval(statusInterval);
+      }
+    };
+  }, [statusInterval]);
 
   // Update random metrics periodically for idle animations
   useEffect(() => {
     const idleAnimationInterval = setInterval(() => {
       setAnimationTimestamp(new Date());
       setRandomMetrics({
-        cpuUsage: Math.max(
-          5,
-          Math.min(80, randomMetrics.cpuUsage + (Math.random() - 0.5) * 10)
-        ),
-        memoryUsage: Math.max(
-          20,
-          Math.min(90, randomMetrics.memoryUsage + (Math.random() - 0.5) * 8)
-        ),
-        networkTraffic: Math.max(
-          10,
-          Math.min(
-            100,
-            randomMetrics.networkTraffic + (Math.random() - 0.5) * 15
-          )
-        ),
+        cpuUsage: Math.max(5, Math.min(80, randomMetrics.cpuUsage + (Math.random() - 0.5) * 10)),
+        memoryUsage: Math.max(20, Math.min(90, randomMetrics.memoryUsage + (Math.random() - 0.5) * 8)),
+        networkTraffic: Math.max(10, Math.min(100, randomMetrics.networkTraffic + (Math.random() - 0.5) * 15))
       });
     }, 3000);
-
+    
     return () => clearInterval(idleAnimationInterval);
   }, [randomMetrics]);
 
@@ -254,35 +200,32 @@ const CarbonFootprintDashboard = () => {
     if (liveUpdateInterval) {
       clearInterval(liveUpdateInterval);
     }
-
+    
     setIsLiveMode(true);
     setDataUpdateTimestamp(new Date());
-
+    
     // Update data every 5 seconds
     const interval = setInterval(async () => {
       try {
         // Fetch real data from API instead of simulating
         await fetchCarbonData();
         setDataUpdateTimestamp(new Date());
-
+        
         // If a server is selected, update its forecast data too
         if (selectedServer) {
           await fetchForecastForRegion(selectedServer.zone);
-
+          
           // Animate the current intensity value
-          setAnimatedIntensity(
-            serverData.find((s) => s.id === selectedServer.id)?.intensity ||
-              null
-          );
+          setAnimatedIntensity(serverData.find(s => s.id === selectedServer.id)?.intensity || null);
         }
       } catch (error) {
         console.error("Error in live update interval:", error);
       }
     }, 5000);
-
+    
     setLiveUpdateInterval(interval);
   }
-
+  
   // Function to stop live updates
   function stopLiveUpdates() {
     if (liveUpdateInterval) {
@@ -297,8 +240,8 @@ const CarbonFootprintDashboard = () => {
     if (typeof window !== "undefined") {
       // Import the CSS inside the useEffect
       // @ts-ignore
-      import("leaflet/dist/leaflet.css");
-
+      import('leaflet/dist/leaflet.css');
+      
       // Now we're safely on the client side
       const icon = L.icon({
         iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
@@ -313,7 +256,7 @@ const CarbonFootprintDashboard = () => {
       setDefaultIcon(icon);
       L.Marker.prototype.options.icon = icon;
       setIsClient(true);
-
+      
       // Load GeoJSON data for regions
       // No need to fetch from /api/geojson since it doesn't exist
       // Just use the fallback GeoJSON data directly
@@ -323,218 +266,85 @@ const CarbonFootprintDashboard = () => {
           properties: { name: "Virginia", zone: "US-MIDA-PJM" },
           geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [-83.6754, 36.5407],
-                [-83.3755, 37.2024],
-                [-82.9344, 37.5311],
-                [-82.5951, 37.8779],
-                [-81.9673, 38.193],
-                [-81.5262, 38.4169],
-                [-80.8565, 38.5513],
-                [-80.2988, 38.351],
-                [-79.7673, 38.2701],
-                [-79.0876, 38.0803],
-                [-78.4143, 38.2065],
-                [-77.8346, 38.3774],
-                [-77.4353, 38.6835],
-                [-77.0569, 38.9344],
-                [-76.9141, 38.8929],
-                [-76.5859, 38.2065],
-                [-76.2421, 37.9571],
-                [-76.3628, 37.5575],
-                [-76.5421, 37.2157],
-                [-76.3353, 36.9454],
-                [-76.055, 36.8513],
-                [-75.8672, 36.551],
-                [-75.9975, 36.551],
-                [-76.4531, 36.551],
-                [-77.1475, 36.551],
-                [-77.8346, 36.551],
-                [-78.7988, 36.551],
-                [-79.6729, 36.5407],
-                [-80.5029, 36.5407],
-                [-81.3755, 36.5407],
-                [-82.2954, 36.5407],
-                [-83.6754, 36.5407],
-              ],
-            ],
-          },
+            coordinates: [[
+              [-83.6754, 36.5407], [-83.3755, 37.2024], [-82.9344, 37.5311], [-82.5951, 37.8779], 
+              [-81.9673, 38.1930], [-81.5262, 38.4169], [-80.8565, 38.5513], [-80.2988, 38.3510], 
+              [-79.7673, 38.2701], [-79.0876, 38.0803], [-78.4143, 38.2065], [-77.8346, 38.3774], 
+              [-77.4353, 38.6835], [-77.0569, 38.9344], [-76.9141, 38.8929], [-76.5859, 38.2065], 
+              [-76.2421, 37.9571], [-76.3628, 37.5575], [-76.5421, 37.2157], [-76.3353, 36.9454], 
+              [-76.0550, 36.8513], [-75.8672, 36.5510], [-75.9975, 36.5510], [-76.4531, 36.5510], 
+              [-77.1475, 36.5510], [-77.8346, 36.5510], [-78.7988, 36.5510], [-79.6729, 36.5407], 
+              [-80.5029, 36.5407], [-81.3755, 36.5407], [-82.2954, 36.5407], [-83.6754, 36.5407]
+            ]]
+          }
         },
         {
           type: "Feature",
           properties: { name: "California", zone: "US-CAL-CISO" },
           geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [-124.4096, 42.0095],
-                [-124.2065, 41.9583],
-                [-123.6255, 42.0095],
-                [-123.1555, 42.0095],
-                [-122.5195, 42.0095],
-                [-121.9297, 42.0095],
-                [-121.2305, 42.0095],
-                [-120.6201, 41.9959],
-                [-120.0024, 41.9959],
-                [-119.9988, 41.1836],
-                [-119.9988, 40.4534],
-                [-120.0061, 39.7988],
-                [-120.0061, 39.0021],
-                [-120.0024, 38.2471],
-                [-120.0024, 37.5555],
-                [-119.9988, 36.9946],
-                [-119.9988, 36.4032],
-                [-119.9988, 35.7959],
-                [-119.9988, 35.0049],
-                [-120.0024, 34.5642],
-                [-120.0024, 34.0195],
-                [-120.2539, 33.7207],
-                [-120.5005, 33.4375],
-                [-120.7837, 33.3398],
-                [-121.001, 33.2544],
-                [-121.4648, 33.5156],
-                [-121.9043, 33.7573],
-                [-122.2461, 34.1455],
-                [-122.5073, 34.5081],
-                [-122.7539, 34.7461],
-                [-123.0054, 35.0049],
-                [-123.2568, 35.498],
-                [-123.5059, 36.0046],
-                [-123.7573, 36.5625],
-                [-123.999, 37.2485],
-                [-124.1235, 37.6416],
-                [-124.2065, 38.0591],
-                [-124.2896, 38.5156],
-                [-124.3652, 39.0021],
-                [-124.3896, 39.5068],
-                [-124.4096, 40.0],
-                [-124.3408, 40.5151],
-                [-124.2065, 41.0037],
-                [-124.3066, 41.5088],
-                [-124.4096, 42.0095],
-              ],
-            ],
-          },
+            coordinates: [[
+              [-124.4096, 42.0095], [-124.2065, 41.9583], [-123.6255, 42.0095], [-123.1555, 42.0095], 
+              [-122.5195, 42.0095], [-121.9297, 42.0095], [-121.2305, 42.0095], [-120.6201, 41.9959],
+              [-120.0024, 41.9959], [-119.9988, 41.1836], [-119.9988, 40.4534], [-120.0061, 39.7988],
+              [-120.0061, 39.0021], [-120.0024, 38.2471], [-120.0024, 37.5555], [-119.9988, 36.9946],
+              [-119.9988, 36.4032], [-119.9988, 35.7959], [-119.9988, 35.0049], [-120.0024, 34.5642],
+              [-120.0024, 34.0195], [-120.2539, 33.7207], [-120.5005, 33.4375], [-120.7837, 33.3398],
+              [-121.0010, 33.2544], [-121.4648, 33.5156], [-121.9043, 33.7573], [-122.2461, 34.1455],
+              [-122.5073, 34.5081], [-122.7539, 34.7461], [-123.0054, 35.0049], [-123.2568, 35.4980],
+              [-123.5059, 36.0046], [-123.7573, 36.5625], [-123.9990, 37.2485], [-124.1235, 37.6416],
+              [-124.2065, 38.0591], [-124.2896, 38.5156], [-124.3652, 39.0021], [-124.3896, 39.5068],
+              [-124.4096, 40.0000], [-124.3408, 40.5151], [-124.2065, 41.0037], [-124.3066, 41.5088],
+              [-124.4096, 42.0095]
+            ]]
+          }
         },
         {
           type: "Feature",
           properties: { name: "Oregon", zone: "US-NW-PACW" },
           geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [-124.5664, 46.2991],
-                [-124.2432, 46.2991],
-                [-124.0137, 45.7693],
-                [-123.9111, 45.5278],
-                [-123.4619, 45.7085],
-                [-123.1787, 45.9521],
-                [-122.8955, 45.9033],
-                [-122.3853, 45.7046],
-                [-121.9971, 45.6558],
-                [-121.5356, 45.6069],
-                [-121.2177, 45.7046],
-                [-121.084, 45.6069],
-                [-120.6519, 45.7571],
-                [-120.1611, 45.6558],
-                [-119.6094, 45.8569],
-                [-119.0576, 45.9033],
-                [-118.9856, 45.9998],
-                [-117.9602, 45.9033],
-                [-116.9165, 45.9998],
-                [-116.4633, 45.9998],
-                [-116.4633, 44.9636],
-                [-116.4633, 43.8509],
-                [-116.4633, 42.8155],
-                [-116.4633, 41.9918],
-                [-117.1387, 41.9918],
-                [-118.0078, 41.9918],
-                [-119.3555, 41.9918],
-                [-120.6689, 41.9918],
-                [-122.0825, 41.9918],
-                [-123.1982, 41.9918],
-                [-124.5664, 41.9918],
-                [-124.5664, 43.4541],
-                [-124.5664, 44.5278],
-                [-124.5664, 46.2991],
-              ],
-            ],
-          },
+            coordinates: [[
+              [-124.5664, 46.2991], [-124.2432, 46.2991], [-124.0137, 45.7693], [-123.9111, 45.5278],
+              [-123.4619, 45.7085], [-123.1787, 45.9521], [-122.8955, 45.9033], [-122.3853, 45.7046],
+              [-121.9971, 45.6558], [-121.5356, 45.6069], [-121.2177, 45.7046], [-121.0840, 45.6069],
+              [-120.6519, 45.7571], [-120.1611, 45.6558], [-119.6094, 45.8569], [-119.0576, 45.9033],
+              [-118.9856, 45.9998], [-117.9602, 45.9033], [-116.9165, 45.9998], [-116.4633, 45.9998],
+              [-116.4633, 44.9636], [-116.4633, 43.8509], [-116.4633, 42.8155], [-116.4633, 41.9918],
+              [-117.1387, 41.9918], [-118.0078, 41.9918], [-119.3555, 41.9918], [-120.6689, 41.9918],
+              [-122.0825, 41.9918], [-123.1982, 41.9918], [-124.5664, 41.9918], [-124.5664, 43.4541],
+              [-124.5664, 44.5278], [-124.5664, 46.2991]
+            ]]
+          }
         },
         {
           type: "Feature",
           properties: { name: "Great Britain", zone: "GB" },
           geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [-5.7, 49.9],
-                [-5.5, 50.1],
-                [-4.9, 50.4],
-                [-4.2, 51.2],
-                [-5.3, 51.6],
-                [-4.8, 52.0],
-                [-4.5, 52.8],
-                [-3.6, 53.4],
-                [-3.1, 53.4],
-                [-2.9, 53.8],
-                [-3.6, 54.6],
-                [-3.4, 55.0],
-                [-2.7, 55.8],
-                [-2.0, 56.0],
-                [-2.5, 56.5],
-                [-3.3, 56.8],
-                [-2.4, 57.5],
-                [-1.8, 57.6],
-                [-2.0, 58.6],
-                [-1.2, 58.4],
-                [-0.2, 58.3],
-                [0.2, 57.8],
-                [0.3, 56.7],
-                [0.5, 56.0],
-                [1.5, 55.0],
-                [1.8, 53.5],
-                [1.4, 52.9],
-                [1.6, 52.1],
-                [1.3, 51.7],
-                [1.4, 51.2],
-                [0.7, 50.8],
-                [0.0, 50.5],
-                [-0.5, 50.1],
-                [-1.9, 50.0],
-                [-2.6, 50.2],
-                [-3.6, 50.2],
-                [-4.3, 50.3],
-                [-5.7, 49.9],
-              ],
-            ],
-          },
+            coordinates: [[
+              [-5.7, 49.9], [-5.5, 50.1], [-4.9, 50.4], [-4.2, 51.2], [-5.3, 51.6], [-4.8, 52.0],
+              [-4.5, 52.8], [-3.6, 53.4], [-3.1, 53.4], [-2.9, 53.8], [-3.6, 54.6], [-3.4, 55.0],
+              [-2.7, 55.8], [-2.0, 56.0], [-2.5, 56.5], [-3.3, 56.8], [-2.4, 57.5], [-1.8, 57.6],
+              [-2.0, 58.6], [-1.2, 58.4], [-0.2, 58.3], [0.2, 57.8], [0.3, 56.7], [0.5, 56.0],
+              [1.5, 55.0], [1.8, 53.5], [1.4, 52.9], [1.6, 52.1], [1.3, 51.7], [1.4, 51.2],
+              [0.7, 50.8], [0.0, 50.5], [-0.5, 50.1], [-1.9, 50.0], [-2.6, 50.2], [-3.6, 50.2],
+              [-4.3, 50.3], [-5.7, 49.9]
+            ]]
+          }
         },
         {
           type: "Feature",
           properties: { name: "Hong Kong", zone: "HK" },
           geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [113.8, 22.1],
-                [113.9, 22.2],
-                [114.0, 22.3],
-                [114.1, 22.4],
-                [114.2, 22.5],
-                [114.3, 22.5],
-                [114.4, 22.4],
-                [114.3, 22.3],
-                [114.2, 22.2],
-                [114.1, 22.1],
-                [114.0, 22.1],
-                [113.9, 22.1],
-                [113.8, 22.1],
-              ],
-            ],
-          },
-        },
+            coordinates: [[
+              [113.8, 22.1], [113.9, 22.2], [114.0, 22.3], [114.1, 22.4], [114.2, 22.5],
+              [114.3, 22.5], [114.4, 22.4], [114.3, 22.3], [114.2, 22.2], [114.1, 22.1],
+              [114.0, 22.1], [113.9, 22.1], [113.8, 22.1]
+            ]]
+          }
+        }
       ]);
     }
   }, []);
@@ -546,31 +356,32 @@ const CarbonFootprintDashboard = () => {
         const firstServer = serverData[0];
         fetchForecastForRegion(firstServer.zone);
       }
-
+      
       // Start live updates by default
       startLiveUpdates();
     });
   }, []);
-
+  
   // Fetch carbon intensity data from API
   const fetchCarbonData = async () => {
     setIsLoading(true);
-
+    
     try {
       // Fetch all regions' data from our history API
-      const response = await fetch("/api/history");
-
+      const response = await fetch('/api/history');
+      
       let allRegionsData = [];
-
+      
       try {
         // Try to parse the JSON response
         allRegionsData = await response.json();
       } catch (parseError) {
-        console.error("Error parsing JSON response:", parseError);
+        console.error('Error parsing JSON response:', parseError);
         // If JSON parsing fails, throw an error to trigger the fallback
-        throw new Error("Failed to parse API response as JSON");
+        throw new Error('Failed to parse API response as JSON');
       }
-
+      
+      
       // Group data by region
       const dataByRegion: Record<string, ForecastData[]> = {};
       allRegionsData.forEach((item: ForecastData) => {
@@ -579,36 +390,32 @@ const CarbonFootprintDashboard = () => {
         }
         dataByRegion[item.region].push(item);
       });
-
+      
       // Update server data with the latest intensity values from each region
-      const updatedServerData = serverData.map((server) => {
+      const updatedServerData = serverData.map(server => {
         const regionData = dataByRegion[server.zone];
         if (regionData && regionData.length > 0) {
           // Sort by created_at to get the latest entry
-          const sortedData = [...regionData].sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() -
-              new Date(a.created_at).getTime()
+          const sortedData = [...regionData].sort((a, b) => 
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           );
           return {
             ...server,
-            intensity: sortedData[0].intensity,
+            intensity: sortedData[0].intensity
           };
         }
         return server;
       });
-
+      
       setServerData(updatedServerData);
-
+      
       // Set forecast data for the selected server or first server
       if (selectedServer) {
         const selectedRegionData = dataByRegion[selectedServer.zone];
         if (selectedRegionData) {
           // Sort chronologically for the graph
-          const sortedData = [...selectedRegionData].sort(
-            (a, b) =>
-              new Date(a.created_at).getTime() -
-              new Date(b.created_at).getTime()
+          const sortedData = [...selectedRegionData].sort((a, b) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
           setForecastData(sortedData);
         }
@@ -616,24 +423,21 @@ const CarbonFootprintDashboard = () => {
         const firstRegionData = dataByRegion[updatedServerData[0].zone];
         if (firstRegionData) {
           // Sort chronologically for the graph
-          const sortedData = [...firstRegionData].sort(
-            (a, b) =>
-              new Date(a.created_at).getTime() -
-              new Date(b.created_at).getTime()
+          const sortedData = [...firstRegionData].sort((a, b) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
           setForecastData(sortedData);
         }
       }
+      
     } catch (error) {
-      console.error("Error fetching carbon data:", error);
+      console.error('Error fetching carbon data:', error);
       // Fall back to random data if API fails
-      const updatedData = serverData.map((server) => ({
+      const updatedData = serverData.map(server => ({
         ...server,
-        intensity:
-          server.intensity +
-          (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30),
+        intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
       }));
-
+      
       setServerData(updatedData);
     } finally {
       setIsLoading(false);
@@ -644,30 +448,27 @@ const CarbonFootprintDashboard = () => {
   const fetchForecastForRegion = async (zone: string) => {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/history");
-
+      const response = await fetch('/api/history');
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch forecast data for zone: ${zone}`);
       }
-
+      
       // Check if the response is JSON before parsing
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("API did not return JSON data");
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('API did not return JSON data');
       }
-
+      
       const allRegionsData = await response.json();
-
+      
       // Filter data for the selected region
-      const regionData = allRegionsData.filter(
-        (item: ForecastData) => item.region === zone
-      );
-
+      const regionData = allRegionsData.filter((item: ForecastData) => item.region === zone);
+      
       if (regionData.length > 0) {
         // Sort data by timestamp to ensure proper chronological order
-        const sortedData = [...regionData].sort(
-          (a, b) =>
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        const sortedData = [...regionData].sort((a, b) => 
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
         setForecastData(sortedData);
         console.log(`Loaded ${sortedData.length} data points for ${zone}`);
@@ -750,9 +551,9 @@ const CarbonFootprintDashboard = () => {
     `;
 
     // Add the animation style to the document if it doesn't exist
-    if (!document.getElementById("marker-animations")) {
-      const styleEl = document.createElement("style");
-      styleEl.id = "marker-animations";
+    if (!document.getElementById('marker-animations')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'marker-animations';
       styleEl.innerHTML = pulseAnimation;
       document.head.appendChild(styleEl);
     }
@@ -767,51 +568,51 @@ const CarbonFootprintDashboard = () => {
       iconAnchor: [10, 10],
     });
   };
-
+  
   // Get GeoJSON style based on region
   const getGeoJSONStyle = (feature: any) => {
     const zone = feature.properties.zone;
-    const server = serverData.find((s) => s.zone === zone);
+    const server = serverData.find(s => s.zone === zone);
     const isHovered = hoveredRegion === zone;
     const isSelected = selectedServer?.zone === zone;
-
+    
     let fillColor = "#3f3f46"; // Default zinc-700
     let weight = 1;
     let opacity = 0.7;
     let fillOpacity = 0.2;
-
+    
     if (server) {
       if (server.intensity < 200) fillColor = "#10B981"; // green-500
       else if (server.intensity < 350) fillColor = "#FBBF24"; // yellow-500
       else if (server.intensity < 500) fillColor = "#F97316"; // orange-500
       else fillColor = "#EF4444"; // red-500
     }
-
+    
     if (isHovered) {
       weight = 2;
       opacity = 1;
       fillOpacity = 0.4;
     }
-
+    
     if (isSelected) {
       weight = 3;
       opacity = 1;
       fillOpacity = 0.5;
     }
-
+    
     return {
       fillColor,
       color: "#ffffff",
       weight,
       opacity,
-      fillOpacity,
+      fillOpacity
     };
   };
-
+  
   // Event handlers for GeoJSON features
   const onEachFeature = (feature: any, layer: any) => {
     const zone = feature.properties.zone;
-
+    
     layer.on({
       mouseover: () => {
         setHoveredRegion(zone);
@@ -820,80 +621,267 @@ const CarbonFootprintDashboard = () => {
         setHoveredRegion(null);
       },
       click: () => {
-        const server = serverData.find((s) => s.zone === zone);
+        const server = serverData.find(s => s.zone === zone);
         if (server) {
           handleServerSelect(server);
         }
-      },
+      }
     });
   };
-
+  
   // Handle server selection with animation
   const handleServerSelect = (server: ServerData) => {
     setSelectedServer(server);
     fetchForecastForRegion(server.zone);
     setAnimatedIntensity(server.intensity);
   };
-
+  
   // Find the greenest server
   const greenestServer = [...serverData].sort(
     (a, b) => a.intensity - b.intensity
   )[0];
 
-  const processCarbonDataAndCallOpenAI = async () => {
-    setIsLoading(true);
-
-    // Simulate API delay
-    setTimeout(async () => {
-      try {
-        // Fetch real carbon intensity data from our API
-        const forecastResponse = await fetch("/api/history", {
-          headers: {
-            "x-region": "US-SW-PNM",
-          },
-        });
-        if (!forecastResponse.ok) {
-          throw new Error("Failed to fetch forecast data");
-        }
-        const forecastResult = await forecastResponse.json();
-
-        // Extract carbon data parameters
-        const { intensity, createdAt, region } =
-          extractCarbonDataParams(forecastResult);
-        console.log({ intensity, createdAt, region });
-
-        setForecastData(forecastResult);
-
-        // Call the OpenAI API with extracted parameters
-        try {
-          const response = await fetch("/api/openai", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              prompt: `Determine the time when the carbon intensity is lowest for ${
-                greenestServer.name
-              }, which currently has an intensity of ${
-                greenestServer.intensity
-              } gCO2/kWh as of ${new Date(
-                greenestServer.createdAt
-              ).toLocaleString()}.`,
-            }),
-          });
-
-          const data = await response.json();
-          console.log(data);
-        } catch (error) {
-          console.error("Error calling OpenAI API:", error);
-        }
-      } catch (error) {
-        console.error("Error fetching forecast data:", error);
+  // Handle file upload logic
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.name.endsWith('.ipynb')) {
+        setTrainingFile(selectedFile);
+        setUploadError(null);
+      } else {
+        setTrainingFile(null);
+        setUploadError('Please select a valid Jupyter notebook (.ipynb) file');
       }
+    }
+  };
 
-      setIsLoading(false);
-    }, 1000);
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!trainingFile) {
+      setUploadError('Please select a notebook file first');
+      return;
+    }
+    
+    setIsUploading(true);
+    setUploadError(null);
+    setTrainingJob(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('notebook', trainingFile);
+      
+      const response = await fetch('/api/warren-run', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to upload notebook');
+      }
+      
+      setTrainingJob(data);
+      
+      // Start polling for job status
+      if (data.jobName) {
+        const interval = setInterval(async () => {
+          await checkJobStatus(data.jobName);
+        }, 10000); // Check every 10 seconds
+        
+        setStatusInterval(interval);
+      }
+      
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const checkJobStatus = async (jobName: string) => {
+    if (!jobName || checkingStatus) return;
+    
+    setCheckingStatus(true);
+    
+    try {
+      const response = await fetch(`/api/job-status?jobName=${encodeURIComponent(jobName)}`);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to check job status');
+      }
+      
+      setTrainingJob((prev) => prev ? { ...prev, ...data } : data);
+      
+      // If job is completed or failed, stop polling
+      if (data.status === 'Completed' || data.status === 'Failed' || data.status === 'Stopped') {
+        if (statusInterval) {
+          clearInterval(statusInterval);
+          setStatusInterval(null);
+        }
+      }
+      
+    } catch (err) {
+      console.error('Error checking job status:', err);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Completed':
+        return 'bg-green-100 text-green-800';
+      case 'Failed':
+      case 'Stopped':
+        return 'bg-red-100 text-red-800';
+      case 'InProgress':
+      case 'processing':
+        return 'bg-blue-100 text-blue-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Update the handleScheduleTraining function to show the upload modal
+  const handleScheduleTraining = async () => {
+    setShowUploadModal(true);
+  };
+
+  // Notebook Upload Modal Component
+  const NotebookUploadModal = () => {
+    if (!showUploadModal) return null;
+    
+    return (
+      <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
+        <div className="bg-zinc-800 p-6 rounded-lg shadow-xl max-w-md w-full">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-zinc-200">Upload Training Notebook</h2>
+            <button 
+              onClick={() => setShowUploadModal(false)}
+              className="text-zinc-400 hover:text-zinc-200"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          {!trainingJob ? (
+            <form onSubmit={handleUploadSubmit}>
+              <div className="mb-4">
+                <label className="block mb-2 text-sm font-medium text-zinc-300">
+                  Select Notebook File
+                </label>
+                <input
+                  type="file"
+                  accept=".ipynb"
+                  onChange={handleFileChange}
+                  className="block w-full text-sm text-zinc-400
+                           file:mr-4 file:py-2 file:px-4
+                           file:rounded file:border-0
+                           file:text-sm file:font-semibold
+                           file:bg-blue-600 file:text-zinc-200
+                           hover:file:bg-blue-700"
+                />
+                {trainingFile && (
+                  <p className="mt-1 text-sm text-zinc-400">
+                    Selected: {trainingFile.name}
+                  </p>
+                )}
+              </div>
+              
+              <button
+                type="submit"
+                disabled={!trainingFile || isUploading}
+                className={`w-full py-2 px-4 rounded font-medium text-white
+                          ${!trainingFile || isUploading 
+                            ? 'bg-zinc-600 cursor-not-allowed' 
+                            : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                {isUploading ? 'Uploading...' : 'Upload and Run Notebook'}
+              </button>
+              
+              {uploadError && (
+                <div className="mt-4 p-3 bg-red-900/40 text-red-400 rounded">
+                  <p>{uploadError}</p>
+                </div>
+              )}
+            </form>
+          ) : (
+            <div className="text-zinc-300">
+              <h3 className="font-bold mb-2">Job Information</h3>
+              <p className="mt-2">Job ID: {trainingJob.jobId}</p>
+              <p className="mt-1">Job Name: {trainingJob.jobName}</p>
+              
+              {trainingJob.status && (
+                <p className="mt-2">
+                  Status: 
+                  <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${getStatusColor(trainingJob.status)}`}>
+                    {trainingJob.status}
+                  </span>
+                </p>
+              )}
+              
+              {trainingJob.startTime && (
+                <p className="mt-1">Started: {new Date(trainingJob.startTime).toLocaleString()}</p>
+              )}
+              
+              {trainingJob.endTime && (
+                <p className="mt-1">Completed: {new Date(trainingJob.endTime).toLocaleString()}</p>
+              )}
+              
+              {trainingJob.outputs && trainingJob.outputs.length > 0 && (
+                <div className="mt-3">
+                  <h4 className="font-semibold">Output Files:</h4>
+                  <ul className="mt-1 text-sm">
+                    {trainingJob.outputs.map((output: any, index: number) => (
+                      <li key={index} className="mt-1">
+                        {output.key.split('/').pop()} - {(output.size / 1024).toFixed(2)} KB
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              
+              {trainingJob.status === 'Completed' && (
+                <p className="mt-3 text-green-400">
+                  Notebook execution completed successfully!
+                </p>
+              )}
+              
+              {trainingJob.status === 'Failed' && (
+                <div className="mt-3">
+                  <p className="text-red-400 font-medium">Notebook execution failed.</p>
+                  {trainingJob.failureReason && (
+                    <p className="mt-1 text-sm text-red-400">
+                      Reason: {trainingJob.failureReason}
+                    </p>
+                  )}
+                </div>
+              )}
+              
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    if (statusInterval) {
+                      clearInterval(statusInterval);
+                      setStatusInterval(null);
+                    }
+                  }}
+                  className="px-4 py-2 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -910,7 +898,7 @@ const CarbonFootprintDashboard = () => {
         <div className="flex items-center space-x-4">
           {/* Add animated system status indicators */}
           <div className="hidden md:flex items-center space-x-3 mr-4 text-xs">
-            <motion.div
+            <motion.div 
               className="flex items-center"
               animate={{ opacity: [0.7, 1, 0.7] }}
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
@@ -918,40 +906,26 @@ const CarbonFootprintDashboard = () => {
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1"></div>
               <span className="text-green-400">System Online</span>
             </motion.div>
-            <motion.div
+            <motion.div 
               className="flex items-center"
               initial={{ opacity: 0.8 }}
               animate={{ opacity: [0.8, 1, 0.8] }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: 1,
-              }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 1 }}
             >
               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1"></div>
-              <span className="text-blue-400">
-                CPU: {Math.round(randomMetrics.cpuUsage)}%
-              </span>
+              <span className="text-blue-400">CPU: {Math.round(randomMetrics.cpuUsage)}%</span>
             </motion.div>
-            <motion.div
+            <motion.div 
               className="flex items-center"
               initial={{ opacity: 0.8 }}
               animate={{ opacity: [0.8, 1, 0.8] }}
-              transition={{
-                duration: 3.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: 0.5,
-              }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
             >
               <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mr-1"></div>
-              <span className="text-purple-400">
-                MEM: {Math.round(randomMetrics.memoryUsage)}%
-              </span>
+              <span className="text-purple-400">MEM: {Math.round(randomMetrics.memoryUsage)}%</span>
             </motion.div>
           </div>
-
+          
           <div className="flex space-x-2">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -982,16 +956,16 @@ const CarbonFootprintDashboard = () => {
       </header>
 
       {/* Add a subtle animated border at the top with fixed animation properties */}
-      <motion.div
+      <motion.div 
         className="h-0.5 bg-gradient-to-r from-green-600 via-blue-500 to-purple-600"
-        animate={{
-          backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
+        animate={{ 
+          backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"]
         }}
-        transition={{
-          duration: 15,
+        transition={{ 
+          duration: 15, 
           repeat: Infinity,
           ease: "linear",
-          repeatType: "loop",
+          repeatType: "loop"
         }}
         style={{ backgroundSize: "200% 100%" }}
       />
@@ -1006,16 +980,13 @@ const CarbonFootprintDashboard = () => {
             } relative`}
           >
             {isClient && (
-              <MapWrapper
-                selectedServer={selectedServer}
-                isClientSide={isClient}
-              >
+              <MapWrapper selectedServer={selectedServer} isClientSide={isClient}>
                 {/* GeoJSON overlays for regions */}
                 {geoJSONData.map((feature, index) => {
                   // We need to use require here to avoid SSR issues
-                  const { GeoJSON } = require("react-leaflet");
+                  const { GeoJSON } = require('react-leaflet');
                   return (
-                    <GeoJSON
+                    <GeoJSON 
                       key={`geojson-${index}`}
                       data={feature}
                       style={getGeoJSONStyle}
@@ -1023,14 +994,14 @@ const CarbonFootprintDashboard = () => {
                     />
                   );
                 })}
-
-                {serverData.map((server) => {
+                
+                {serverData.map(server => {
                   // We need to use require here to avoid SSR issues
-                  const { Marker } = require("react-leaflet");
+                  const { Marker } = require('react-leaflet');
                   return (
-                    <Marker
-                      key={server.id}
-                      position={[server.lat, server.lng]}
+                    <Marker 
+                      key={server.id} 
+                      position={[server.lat, server.lng]} 
                       icon={getIntensityIcon(server.intensity)}
                       eventHandlers={{
                         click: () => {
@@ -1065,78 +1036,57 @@ const CarbonFootprintDashboard = () => {
                 {isLoading ? "Updating..." : "Refresh Data"}
               </motion.button>
             </div>
-
+            
             {/* Live update indicator */}
             {isLiveMode && dataUpdateTimestamp && (
               <div className="absolute bottom-4 right-4 z-[1000] bg-zinc-800 bg-opacity-80 text-zinc-200 text-xs px-3 py-1 rounded-md flex items-center shadow-lg">
-                <motion.div
+                <motion.div 
                   className="w-2 h-2 rounded-full bg-green-500 mr-2"
                   animate={{ opacity: [1, 0.3, 1] }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                 />
-                <span>
-                  Live Mode • Last update:{" "}
-                  {dataUpdateTimestamp.toLocaleTimeString()}
-                </span>
+                <span>Live Mode • Last update: {dataUpdateTimestamp.toLocaleTimeString()}</span>
               </div>
             )}
-
+            
             {/* Add floating data metrics */}
             <div className="absolute top-4 left-4 z-[1000] bg-zinc-800 bg-opacity-70 text-zinc-200 text-xs p-2 rounded-md shadow-lg border border-zinc-700">
               <div className="flex flex-col space-y-1">
-                <motion.div
+                <motion.div 
                   className="flex justify-between items-center"
                   initial={{ opacity: 0.8 }}
                   animate={{ opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 4, repeat: Infinity }}
                 >
                   <span className="text-zinc-400 mr-2">Global Average:</span>
-                  <span className="font-medium">
-                    {Math.round(
-                      serverData.reduce(
-                        (sum, server) => sum + server.intensity,
-                        0
-                      ) / serverData.length
-                    )}{" "}
-                    gCO₂/kWh
-                  </span>
+                  <span className="font-medium">{Math.round(serverData.reduce((sum, server) => sum + server.intensity, 0) / serverData.length)} gCO₂/kWh</span>
                 </motion.div>
-                <motion.div
+                <motion.div 
                   className="flex justify-between items-center"
                   initial={{ opacity: 0.8 }}
                   animate={{ opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 4, repeat: Infinity, delay: 1 }}
                 >
                   <span className="text-zinc-400 mr-2">Best Region:</span>
-                  <span className="font-medium text-green-400">
-                    {greenestServer?.intensity} gCO₂/kWh
-                  </span>
+                  <span className="font-medium text-green-400">{greenestServer?.intensity} gCO₂/kWh</span>
                 </motion.div>
-                <motion.div
+                <motion.div 
                   className="flex justify-between items-center"
                   initial={{ opacity: 0.8 }}
                   animate={{ opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 4, repeat: Infinity, delay: 2 }}
                 >
                   <span className="text-zinc-400 mr-2">Network:</span>
-                  <span className="font-medium text-blue-400">
-                    {Math.round(randomMetrics.networkTraffic)} Mbps
-                  </span>
+                  <span className="font-medium text-blue-400">{Math.round(randomMetrics.networkTraffic)} Mbps</span>
                 </motion.div>
-                <motion.div
+                <motion.div 
                   className="flex justify-between items-center"
                   initial={{ opacity: 0.8 }}
                   animate={{ opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 4, repeat: Infinity, delay: 3 }}
                 >
                   <span className="text-zinc-400 mr-2">Last Scan:</span>
-                  <span className="font-medium">
-                    {animationTimestamp.toLocaleTimeString()}
-                  </span>
+                  <span className="font-medium">{animationTimestamp.toLocaleTimeString()}</span>
                 </motion.div>
               </div>
             </div>
@@ -1148,14 +1098,14 @@ const CarbonFootprintDashboard = () => {
               <h2 className="text-lg font-semibold text-zinc-100 flex items-center">
                 <motion.span
                   className="inline-block w-2 h-2 rounded-full bg-green-500 mr-2"
-                  animate={{
+                  animate={{ 
                     scale: [1, 1.3, 1],
-                    opacity: [0.7, 1, 0.7],
+                    opacity: [0.7, 1, 0.7]
                   }}
-                  transition={{
+                  transition={{ 
                     duration: 3,
                     repeat: Infinity,
-                    repeatType: "reverse",
+                    repeatType: "reverse"
                   }}
                 />
                 Green Scheduler
@@ -1164,7 +1114,7 @@ const CarbonFootprintDashboard = () => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
-                onClick={processCarbonDataAndCallOpenAI}
+                onClick={handleScheduleTraining}
               >
                 Schedule Training
               </motion.button>
@@ -1178,14 +1128,10 @@ const CarbonFootprintDashboard = () => {
                 <div className="h-20 bg-zinc-800 rounded-lg mb-1 relative border border-zinc-700">
                   {isLoading ? (
                     <div className="flex items-center justify-center h-full">
-                      <motion.div
+                      <motion.div 
                         className="rounded-full h-6 w-6 border-t-2 border-green-500"
                         animate={{ rotate: 360 }}
-                        transition={{
-                          duration: 1,
-                          repeat: Infinity,
-                          ease: "linear",
-                        }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                       />
                     </div>
                   ) : (
@@ -1193,9 +1139,7 @@ const CarbonFootprintDashboard = () => {
                       {forecastData.length > 0 ? (
                         <div className="absolute left-2 top-0 h-full flex flex-col justify-between text-xs text-zinc-300 pr-1">
                           <motion.span
-                            key={`max-${Math.max(
-                              ...forecastData.map((d) => d.intensity)
-                            )}`}
+                            key={`max-${Math.max(...forecastData.map((d) => d.intensity))}`}
                             initial={{ opacity: 0, x: -5 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.3 }}
@@ -1204,9 +1148,7 @@ const CarbonFootprintDashboard = () => {
                             gCO₂
                           </motion.span>
                           <motion.span
-                            key={`min-${Math.min(
-                              ...forecastData.map((d) => d.intensity)
-                            )}`}
+                            key={`min-${Math.min(...forecastData.map((d) => d.intensity))}`}
                             initial={{ opacity: 0, x: -5 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.3 }}
@@ -1317,10 +1259,7 @@ const CarbonFootprintDashboard = () => {
                                   <motion.path
                                     initial={{ pathLength: 0, opacity: 0 }}
                                     animate={{ pathLength: 1, opacity: 1 }}
-                                    transition={{
-                                      duration: 1,
-                                      ease: "easeInOut",
-                                    }}
+                                    transition={{ duration: 1, ease: "easeInOut" }}
                                     d={`
                                       M0,${scaleY(forecastData[0].intensity)}
                                       ${forecastData
@@ -1348,10 +1287,10 @@ const CarbonFootprintDashboard = () => {
                                       key={index}
                                       initial={{ scale: 0 }}
                                       animate={{ scale: 1 }}
-                                      transition={{
-                                        delay: index * 0.05,
+                                      transition={{ 
+                                        delay: index * 0.05, 
                                         duration: 0.3,
-                                        type: "spring",
+                                        type: "spring"
                                       }}
                                       cx={`${
                                         (index / (forecastData.length - 1)) *
@@ -1444,12 +1383,12 @@ const CarbonFootprintDashboard = () => {
                                 if (tooltip) {
                                   const date = new Date(data.created_at);
                                   const formattedDate = date.toLocaleString(
-                                    [],
-                                    {
-                                      month: "short",
-                                      day: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
+                                    [], 
+                                    { 
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: "2-digit", 
+                                      minute: "2-digit" 
                                     }
                                   );
                                   tooltip.innerHTML = `<div class="font-medium">${data.intensity} gCO<sub>2</sub>/kWh</div><div>${formattedDate}</div>`;
@@ -1482,15 +1421,14 @@ const CarbonFootprintDashboard = () => {
                   {forecastData.length > 0 ? (
                     <>
                       <span>
-                        {new Date(forecastData[0].created_at).toLocaleString(
-                          [],
-                          {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          }
-                        )}
+                        {new Date(
+                          forecastData[0].created_at
+                        ).toLocaleString([], {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </span>
                       <span>
                         {forecastData.length > 2 &&
@@ -1499,8 +1437,8 @@ const CarbonFootprintDashboard = () => {
                               Math.floor(forecastData.length / 2)
                             ].created_at
                           ).toLocaleString([], {
-                            month: "short",
-                            day: "numeric",
+                            month: 'short',
+                            day: 'numeric',
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
@@ -1509,8 +1447,8 @@ const CarbonFootprintDashboard = () => {
                         {new Date(
                           forecastData[forecastData.length - 1].created_at
                         ).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
+                          month: 'short',
+                          day: 'numeric',
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
@@ -1530,9 +1468,13 @@ const CarbonFootprintDashboard = () => {
                 <h3 className="font-medium mb-2 text-zinc-200 text-sm">
                   Optimal Training Windows
                 </h3>
-
                 <div className="space-y-2">
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
+                  >
                     <div>
                       <p className="font-medium text-xs text-zinc-200">
                         Today, 3:00 AM - 7:00 AM
@@ -1544,9 +1486,14 @@ const CarbonFootprintDashboard = () => {
                     <div className="text-green-400 font-medium text-xs">
                       115 gCO<sub>2</sub>/kWh
                     </div>
-                  </div>
+                  </motion.div>
 
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.1 }}
+                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
+                  >
                     <div>
                       <p className="font-medium text-xs text-zinc-200">
                         Tomorrow, 2:00 AM - 6:00 AM
@@ -1556,7 +1503,7 @@ const CarbonFootprintDashboard = () => {
                     <div className="text-green-400 font-medium text-xs">
                       130 gCO<sub>2</sub>/kWh
                     </div>
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             </div>
@@ -1570,12 +1517,12 @@ const CarbonFootprintDashboard = () => {
               <h2 className="text-lg font-semibold mb-4 text-zinc-100 flex items-center">
                 <motion.div
                   className="inline-block w-3 h-3 rounded-full bg-blue-500 mr-2"
-                  animate={{
+                  animate={{ 
                     boxShadow: [
                       "0 0 0 rgba(59, 130, 246, 0)",
                       "0 0 0 rgba(59, 130, 246, 0.4)",
-                      "0 0 0 rgba(59, 130, 246, 0)",
-                    ],
+                      "0 0 0 rgba(59, 130, 246, 0)"
+                    ]
                   }}
                   transition={{ duration: 2, repeat: Infinity }}
                 />
@@ -1588,7 +1535,7 @@ const CarbonFootprintDashboard = () => {
                   <h3 className="font-medium text-zinc-200">
                     Carbon Footprint
                   </h3>
-                  <motion.span
+                  <motion.span 
                     key={savingsPercentage}
                     initial={{ scale: 0.8 }}
                     animate={{ scale: 1 }}
@@ -1599,14 +1546,14 @@ const CarbonFootprintDashboard = () => {
                 </div>
 
                 <div className="flex space-x-2 mb-2">
-                  <motion.div
+                  <motion.div 
                     initial={{ height: 0 }}
                     animate={{ height: "auto" }}
                     transition={{ duration: 0.5 }}
                     className="flex-1 bg-red-900 p-2 rounded-lg text-center"
                   >
                     <p className="text-red-300 text-xs">Standard</p>
-                    <motion.p
+                    <motion.p 
                       key={currentData.baseline}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1615,14 +1562,14 @@ const CarbonFootprintDashboard = () => {
                       {currentData.baseline} kg
                     </motion.p>
                   </motion.div>
-                  <motion.div
+                  <motion.div 
                     initial={{ height: 0 }}
                     animate={{ height: "auto" }}
                     transition={{ duration: 0.5, delay: 0.1 }}
                     className="flex-1 bg-yellow-900 p-2 rounded-lg text-center"
                   >
                     <p className="text-yellow-300 text-xs">Optimized</p>
-                    <motion.p
+                    <motion.p 
                       key={currentData.optimized}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1631,14 +1578,14 @@ const CarbonFootprintDashboard = () => {
                       {currentData.optimized} kg
                     </motion.p>
                   </motion.div>
-                  <motion.div
+                  <motion.div 
                     initial={{ height: 0 }}
                     animate={{ height: "auto" }}
                     transition={{ duration: 0.5, delay: 0.2 }}
                     className="flex-1 bg-green-900 p-2 rounded-lg text-center"
                   >
                     <p className="text-green-300 text-xs">Green Energy</p>
-                    <motion.p
+                    <motion.p 
                       key={currentData.renewable}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1801,36 +1748,27 @@ const CarbonFootprintDashboard = () => {
               </div>
 
               {/* Add animated efficiency tips */}
-              <motion.div
+              <motion.div 
                 className="mt-6 p-3 border border-blue-800 bg-blue-900 bg-opacity-30 rounded-lg"
                 initial={{ opacity: 0.9, y: 5 }}
-                animate={{
+                animate={{ 
                   opacity: [0.9, 1, 0.9],
-                  y: [5, 0, 5],
+                  y: [5, 0, 5]
                 }}
-                transition={{
+                transition={{ 
                   duration: 6,
                   repeat: Infinity,
-                  repeatType: "reverse",
+                  repeatType: "reverse"
                 }}
               >
                 <h3 className="text-sm font-medium text-blue-300 mb-1 flex items-center">
-                  <svg
-                    className="w-4 h-4 mr-1"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9z"
-                      clipRule="evenodd"
-                    />
+                  <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9z" clipRule="evenodd" />
                   </svg>
                   Efficiency Tip
                 </h3>
                 <p className="text-xs text-blue-200">
-                  Training during low-carbon intensity periods can reduce
-                  emissions by up to 80% compared to peak hours.
+                  Training during low-carbon intensity periods can reduce emissions by up to 80% compared to peak hours.
                 </p>
               </motion.div>
             </div>
@@ -1841,12 +1779,12 @@ const CarbonFootprintDashboard = () => {
               <h2 className="text-lg font-semibold mb-4 text-zinc-100 flex items-center">
                 <motion.div
                   className="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"
-                  animate={{
+                  animate={{ 
                     boxShadow: [
                       "0 0 0 rgba(16, 185, 129, 0)",
                       "0 0 0 rgba(16, 185, 129, 0.4)",
-                      "0 0 0 rgba(16, 185, 129, 0)",
-                    ],
+                      "0 0 0 rgba(16, 185, 129, 0)"
+                    ]
                   }}
                   transition={{ duration: 2, repeat: Infinity }}
                 />
@@ -1856,7 +1794,7 @@ const CarbonFootprintDashboard = () => {
               {/* Selected server details - Integrated from popup */}
               <AnimatePresence>
                 {selectedServer && (
-                  <motion.div
+                  <motion.div 
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
@@ -1882,22 +1820,13 @@ const CarbonFootprintDashboard = () => {
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-zinc-400">
-                          Carbon Intensity
-                        </p>
-                        <motion.p
+                        <p className="text-sm text-zinc-400">Carbon Intensity</p>
+                        <motion.p 
                           key={selectedServer.intensity}
                           initial={{ color: "#ffffff" }}
-                          animate={{
-                            color:
-                              selectedServer.intensity < 200
-                                ? "#10B981"
-                                : selectedServer.intensity < 350
-                                ? "#FBBF24"
-                                : selectedServer.intensity < 500
-                                ? "#F97316"
-                                : "#EF4444",
-                          }}
+                          animate={{ color: selectedServer.intensity < 200 ? "#10B981" : 
+                                           selectedServer.intensity < 350 ? "#FBBF24" : 
+                                           selectedServer.intensity < 500 ? "#F97316" : "#EF4444" }}
                           className="font-medium text-zinc-200"
                         >
                           {animatedIntensity !== null ? (
@@ -1910,8 +1839,7 @@ const CarbonFootprintDashboard = () => {
                             </motion.span>
                           ) : (
                             selectedServer.intensity
-                          )}{" "}
-                          gCO<sub>2</sub>/kWh
+                          )} gCO<sub>2</sub>/kWh
                         </motion.p>
                       </div>
                       <div>
@@ -1922,13 +1850,9 @@ const CarbonFootprintDashboard = () => {
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-zinc-400">
-                          Estimated Savings
-                        </p>
-                        <motion.p
-                          key={Math.round(
-                            (550 - selectedServer.intensity) / 5.5
-                          )}
+                        <p className="text-sm text-zinc-400">Estimated Savings</p>
+                        <motion.p 
+                          key={Math.round((550 - selectedServer.intensity) / 5.5)}
                           initial={{ scale: 0.9 }}
                           animate={{ scale: 1 }}
                           className="font-medium text-green-500"
@@ -1948,7 +1872,7 @@ const CarbonFootprintDashboard = () => {
               </AnimatePresence>
 
               {/* Recommended server section */}
-              <motion.div
+              <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4 }}
@@ -1958,7 +1882,7 @@ const CarbonFootprintDashboard = () => {
                   Recommended Server
                 </h3>
                 {greenestServer && (
-                  <motion.div
+                  <motion.div 
                     className="flex items-center justify-between"
                     initial={{ x: -10, opacity: 0 }}
                     animate={{ x: 0, opacity: 1 }}
@@ -1977,21 +1901,21 @@ const CarbonFootprintDashboard = () => {
                         className={`w-3 h-3 rounded-full ${getIntensityColor(
                           greenestServer.intensity
                         )} mr-2`}
-                        animate={{
+                        animate={{ 
                           scale: [1, 1.2, 1],
-                          opacity: [1, 0.8, 1],
+                          opacity: [1, 0.8, 1]
                         }}
-                        transition={{
+                        transition={{ 
                           duration: 2,
                           repeat: Infinity,
-                          repeatType: "reverse",
+                          repeatType: "reverse"
                         }}
                       ></motion.div>
                       <span className="font-medium text-zinc-200">
                         {greenestServer.intensity} gCO<sub>2</sub>/kWh
                       </span>
                     </div>
-                    <motion.button
+                    <motion.button 
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
@@ -2039,17 +1963,13 @@ const CarbonFootprintDashboard = () => {
                           <td className="px-3 py-2 whitespace-nowrap">
                             <div className="text-sm font-medium text-zinc-200">
                               {server.name}
-                              {isLiveMode &&
-                                server.id === selectedServer?.id && (
-                                  <motion.span
-                                    className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-green-500"
-                                    animate={{ opacity: [1, 0.3, 1] }}
-                                    transition={{
-                                      duration: 1.5,
-                                      repeat: Infinity,
-                                    }}
-                                  />
-                                )}
+                              {isLiveMode && server.id === selectedServer?.id && (
+                                <motion.span 
+                                  className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-green-500"
+                                  animate={{ opacity: [1, 0.3, 1] }}
+                                  transition={{ duration: 1.5, repeat: Infinity }}
+                                />
+                              )}
                             </div>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
@@ -2064,7 +1984,7 @@ const CarbonFootprintDashboard = () => {
                                   server.intensity
                                 )} mr-2`}
                               ></div>
-                              <motion.div
+                              <motion.div 
                                 key={server.intensity}
                                 className="text-sm text-zinc-200"
                                 initial={{ opacity: 0.7 }}
@@ -2073,17 +1993,16 @@ const CarbonFootprintDashboard = () => {
                               >
                                 {server.intensity}
                               </motion.div>
-                              {isLiveMode &&
-                                server.id === selectedServer?.id && (
-                                  <motion.span
-                                    className="ml-1 text-xs text-green-400"
-                                    initial={{ opacity: 0, x: -5 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: 5 }}
-                                  >
-                                    live
-                                  </motion.span>
-                                )}
+                              {isLiveMode && server.id === selectedServer?.id && (
+                                <motion.span 
+                                  className="ml-1 text-xs text-green-400"
+                                  initial={{ opacity: 0, x: -5 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  exit={{ opacity: 0, x: 5 }}
+                                >
+                                  live
+                                </motion.span>
+                              )}
                             </div>
                           </td>
                         </motion.tr>
@@ -2093,53 +2012,42 @@ const CarbonFootprintDashboard = () => {
               </div>
 
               {/* Add animated carbon savings counter */}
-              <motion.div
+              <motion.div 
                 className="mt-4 p-3 border border-green-800 bg-green-900 bg-opacity-30 rounded-lg"
                 initial={{ opacity: 0.9 }}
-                animate={{
+                animate={{ 
                   opacity: [0.9, 1, 0.9],
                 }}
-                transition={{
+                transition={{ 
                   duration: 4,
                   repeat: Infinity,
-                  repeatType: "reverse",
+                  repeatType: "reverse"
                 }}
               >
-                <h3 className="text-sm font-medium text-green-300 mb-1">
-                  Carbon Savings Tracker
-                </h3>
+                <h3 className="text-sm font-medium text-green-300 mb-1">Carbon Savings Tracker</h3>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-green-200">
-                    Potential Monthly Savings:
-                  </span>
-                  <motion.span
+                  <span className="text-xs text-green-200">Potential Monthly Savings:</span>
+                  <motion.span 
                     className="text-sm font-bold text-green-300"
                     initial={{ opacity: 0.9 }}
-                    animate={{
+                    animate={{ 
                       opacity: [0.9, 1, 0.9],
-                      scale: [1, 1.03, 1],
+                      scale: [1, 1.03, 1]
                     }}
-                    transition={{
+                    transition={{ 
                       duration: 3,
                       repeat: Infinity,
-                      repeatType: "reverse",
+                      repeatType: "reverse"
                     }}
                   >
-                    {(Math.round(550 - greenestServer?.intensity) * 24 * 30) /
-                      1000}{" "}
-                    kg CO₂
+                    {Math.round(550 - greenestServer?.intensity) * 24 * 30 / 1000} kg CO₂
                   </motion.span>
                 </div>
                 <div className="w-full bg-green-800 bg-opacity-30 h-1.5 rounded-full mt-1 overflow-hidden">
-                  <motion.div
+                  <motion.div 
                     className="h-full bg-green-500"
                     initial={{ width: "0%" }}
-                    animate={{
-                      width: `${Math.min(
-                        100,
-                        (550 - (greenestServer?.intensity || 0)) / 5.5
-                      )}%`,
-                    }}
+                    animate={{ width: `${Math.min(100, (550 - (greenestServer?.intensity || 0)) / 5.5)}%` }}
                     transition={{ duration: 1.5, ease: "easeOut" }}
                   />
                 </div>
@@ -2148,34 +2056,31 @@ const CarbonFootprintDashboard = () => {
           )}
 
           <div className="p-4 border-t border-zinc-700">
-            <motion.button
+            <motion.button 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md relative overflow-hidden group"
+              onClick={handleScheduleTraining}
             >
               <span className="relative z-10">Start Optimized Training</span>
-              <motion.div
+              <motion.div 
                 className="absolute inset-0 bg-green-500 opacity-0 group-hover:opacity-20"
-                animate={{
-                  x: ["-100%", "100%"],
+                animate={{ 
+                  x: ["-100%", "100%"]
                 }}
-                transition={{
-                  duration: 1.5,
+                transition={{ 
+                  duration: 1.5, 
                   repeat: Infinity,
-                  ease: "easeInOut",
+                  ease: "easeInOut"
                 }}
               />
             </motion.button>
-
+            
             {/* Add animated status text */}
-            <motion.p
+            <motion.p 
               className="text-center text-xs text-zinc-500 mt-2"
               animate={{ opacity: [0.5, 0.8, 0.5] }}
-              transition={{
-                duration: 4,
-                repeat: Infinity,
-                repeatType: "reverse",
-              }}
+              transition={{ duration: 4, repeat: Infinity, repeatType: "reverse" }}
             >
               System ready • {new Date().toLocaleDateString()} • v1.2.0
             </motion.p>
@@ -2186,7 +2091,7 @@ const CarbonFootprintDashboard = () => {
       {/* Notification system */}
       <AnimatePresence>
         {isLiveMode && dataUpdateTimestamp && (
-          <motion.div
+          <motion.div 
             id="live-notification"
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2196,7 +2101,7 @@ const CarbonFootprintDashboard = () => {
           >
             <div className="flex items-start">
               <div className="flex-shrink-0 mt-0.5">
-                <motion.div
+                <motion.div 
                   className="w-3 h-3 rounded-full bg-green-500"
                   animate={{ scale: [1, 1.2, 1] }}
                   transition={{ duration: 2, repeat: Infinity }}
@@ -2219,32 +2124,32 @@ const CarbonFootprintDashboard = () => {
           <motion.div
             key={`particle-${i}`}
             className="absolute w-2 h-2 rounded-full bg-green-500 opacity-20"
-            initial={{
-              x: `${Math.random() * 100}%`,
+            initial={{ 
+              x: `${Math.random() * 100}%`, 
               y: `${Math.random() * 100}%`,
-              opacity: 0.1 + Math.random() * 0.2,
+              opacity: 0.1 + Math.random() * 0.2
             }}
-            animate={{
+            animate={{ 
               x: [
-                `${Math.random() * 100}%`,
-                `${Math.random() * 100}%`,
-                `${Math.random() * 100}%`,
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`
               ],
               y: [
-                `${Math.random() * 100}%`,
-                `${Math.random() * 100}%`,
-                `${Math.random() * 100}%`,
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`
               ],
               opacity: [
-                0.1 + Math.random() * 0.2,
-                0.1 + Math.random() * 0.2,
-                0.1 + Math.random() * 0.2,
-              ],
+                0.1 + Math.random() * 0.2, 
+                0.1 + Math.random() * 0.2, 
+                0.1 + Math.random() * 0.2
+              ]
             }}
-            transition={{
+            transition={{ 
               duration: 20 + Math.random() * 10,
               repeat: Infinity,
-              ease: "linear",
+              ease: "linear"
             }}
           />
         ))}
@@ -2253,37 +2158,34 @@ const CarbonFootprintDashboard = () => {
       {/* Loading indicator - non-intrusive version */}
       <AnimatePresence>
         {isLoading && (
-          <motion.div
+          <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed bottom-4 right-4 z-[1000]"
           >
-            <motion.div
+            <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-zinc-800 rounded-lg p-3 shadow-xl flex items-center space-x-3 border border-zinc-700"
             >
-              <motion.div
+              <motion.div 
                 className="w-5 h-5 border-2 border-t-green-500 border-zinc-600 rounded-full"
                 animate={{ rotate: 360 }}
                 transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
               />
-              <p className="text-sm text-zinc-300">Updating data...</p>
+              <p className="text-sm text-zinc-300">
+                Updating data...
+              </p>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <NotebookUploadModal />
     </div>
   );
 };
 
 export default CarbonFootprintDashboard;
-function extractCarbonDataParams(forecastResult: any): {
-  intensity: any;
-  createdAt: any;
-  region: any;
-} {
-  throw new Error("Function not implemented.");
-}
