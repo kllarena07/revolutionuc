@@ -1,10 +1,35 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-// @ts-ignore
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import dynamic from 'next/dynamic';
+
+const MapContainer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.MapContainer),
+  { ssr: false }
+);
+
+const TileLayer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.TileLayer),
+  { ssr: false }
+);
+
+const Marker = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Marker),
+  { ssr: false }
+);
+
+const Popup = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Popup),
+  { ssr: false }
+);
+
+// Import Leaflet only on client-side
+let L: any;
+if (typeof window !== 'undefined') {
+  L = require('leaflet');
+  // Don't import CSS this way - it causes HMR issues
+  // require('leaflet/dist/leaflet.css');
+}
 
 interface ServerData {
   id: string;
@@ -27,17 +52,6 @@ interface ForecastData {
   intensity: number;
 }
 
-const DefaultIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
-
 const CarbonFootprintDashboard = () => {
   const [modelSize, setModelSize] = useState('medium');
   const [location, setLocation] = useState('europe');
@@ -57,6 +71,36 @@ const CarbonFootprintDashboard = () => {
 
   const [forecastData, setForecastData] = useState<ForecastData[]>([]);
   console.log(forecastData);
+  
+  // Create DefaultIcon only on client side
+  const [defaultIcon, setDefaultIcon] = useState<any>(null);
+  
+  // Initialize Leaflet-related items only on client side
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Import the CSS inside the useEffect
+      import('leaflet/dist/leaflet.css');
+      
+      // Now we're safely on the client side
+      const icon = L.icon({
+        iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+      });
+      
+      setDefaultIcon(icon);
+      L.Marker.prototype.options.icon = icon;
+      setIsClient(true);
+    }
+  }, []);
+  
+  useEffect(() => {
+    fetchCarbonData();
+    // No need to set isClient here as it's handled in the Leaflet initialization
+  }, []);
   
   // Simulated API call to get CO2Signal data
   const fetchCarbonData = () => {
@@ -94,13 +138,6 @@ const CarbonFootprintDashboard = () => {
       setIsLoading(false);
     }, 1000);
   };
-  
-  useEffect(() => {
-    fetchCarbonData();
-    setIsClient(true);
-    // In a real implementation, you might set up a polling interval
-    // to refresh data periodically
-  }, []);
   
   // Mock data for the visualization
   const carbonData: CarbonData = {
@@ -144,6 +181,9 @@ const CarbonFootprintDashboard = () => {
   
   // Get Leaflet icon based on carbon intensity
   const getIntensityIcon = (intensity: number) => {
+    // Only create icons on the client side
+    if (typeof window === 'undefined' || !isClient) return null;
+    
     let color = "#10B981"; // green
     if (intensity >= 200 && intensity < 350) color = "#FBBF24"; // yellow
     if (intensity >= 350 && intensity < 500) color = "#F97316"; // orange

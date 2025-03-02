@@ -19,7 +19,7 @@ const getApiUrl = () => {
     return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
   };
   
-  return `https://api.electricitymap.org/v3/carbon-intensity/past-range?zone=US-NY-NYIS&start=${formatDate(start)}&end=${formatDate(end)}`;
+  return `https://api.electricitymap.org/v3/carbon-intensity/history?zone=US-NY-NYIS`;
 };
 
 const API_URL = getApiUrl();
@@ -61,6 +61,7 @@ export async function GET() {
     })
     
     if (!response.ok) {
+      console.log(response)
       throw new Error(`API request failed with status ${response.status}`)
     }
     
