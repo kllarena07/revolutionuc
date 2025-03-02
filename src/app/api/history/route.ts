@@ -10,16 +10,20 @@ const redis = new Redis({
 
 // Cache keys for different regions
 const CACHE_KEYS = {
-  'US-NY-NYIS': 'co2-intensity-nyiso',
+  'US-MIDA-PJM': 'co2-intensity-mida',
   'US-CAL-CISO': 'co2-intensity-cali',
-  'US-SW-PNM': 'co2-intensity-newmex'
+  'US-NW-PACW': 'co2-intensity-oregon',
+  'HK': 'co2-intensity-hk',
+  'GB': 'co2-intensity-gb'
 }
 
 // API tokens for different regions
 const API_TOKENS = {
-  'US-NY-NYIS': process.env.NY_AUTH_TOKEN || '',
+  'US-MIDA-PJM': process.env.VA_AUTH_TOKEN || '',
   'US-CAL-CISO': process.env.CALI_AUTH_TOKEN || '',
-  'US-SW-PNM': process.env.NEWMEX_AUTH_TOKEN || ''
+  'US-NW-PACW': process.env.OREGON_AUTH_TOKEN || '',
+  'HK': process.env.HK_AUTH_TOKEN || '',
+  'GB': process.env.GB_AUTH_TOKEN || ''
 }
 
 const CACHE_TTL = 60 * 60 // 1 hour in seconds
@@ -53,57 +57,67 @@ type TransformedHistoryItem = {
   intensity: number
 }
 
-export async function GET(request: Request) {
+async function fetchRegionData(region: string): Promise<TransformedHistoryItem[]> {
+  const cacheKey = CACHE_KEYS[region as keyof typeof CACHE_KEYS];
+  const apiToken = API_TOKENS[region as keyof typeof API_TOKENS];
+  const apiUrl = getApiUrl(region);
+  
+  // Check if we have cached data
+  const cachedData = await redis.get<TransformedHistoryItem[]>(cacheKey)
+  
+  if (cachedData) {
+    console.log(`Returning cached CO2 intensity data for ${region}`)
+    return cachedData
+  }
+  
+  // No cache or expired, fetch from API
+  console.log(`Fetching fresh CO2 intensity data from API for ${region}`)
+  const response = await fetch(apiUrl, {
+    headers: {
+      'auth-token': apiToken,
+    },
+  })
+  
+  if (!response.ok) {
+    console.log(response)
+    throw new Error(`API request failed with status ${response.status} for region ${region}`)
+  }
+  
+  const data = await response.json()
+  
+  // Transform the data to match the desired schema
+  const transformedData = data.history.map((item: RawHistoryItem): TransformedHistoryItem => ({
+    region: item.zone,
+    created_at: item.datetime,
+    intensity: item.carbonIntensity,
+  }))
+  
+  // Cache the transformed data
+  await redis.set(cacheKey, transformedData, { ex: CACHE_TTL })
+  
+  return transformedData
+}
+
+export async function GET() {
   try {
-    // Get the region from the request header
-    const region = request.headers.get('x-region') || 'US-NY-NYIS';
+    // Get all regions
+    const regions = Object.keys(CACHE_KEYS);
     
-    // Validate region
-    if (!CACHE_KEYS[region as keyof typeof CACHE_KEYS]) {
-      return NextResponse.json(
-        { error: 'Invalid region specified' },
-        { status: 400 }
-      )
-    }
+    // Fetch data for all regions in parallel
+    const allDataPromises = regions.map(region => 
+      fetchRegionData(region)
+        .catch(error => {
+          console.error(`Error fetching data for ${region}:`, error);
+          return [] as TransformedHistoryItem[]; // Return empty array if region fetch fails
+        })
+    );
     
-    const cacheKey = CACHE_KEYS[region as keyof typeof CACHE_KEYS];
-    const apiToken = API_TOKENS[region as keyof typeof API_TOKENS];
-    const apiUrl = getApiUrl(region);
+    const allRegionsData = await Promise.all(allDataPromises);
     
-    // Check if we have cached data
-    const cachedData = await redis.get<TransformedHistoryItem[]>(cacheKey)
+    // Combine all region data into a single array
+    const combinedData = allRegionsData.flat();
     
-    if (cachedData) {
-      console.log(`Returning cached CO2 intensity data for ${region}`)
-      return NextResponse.json(cachedData)
-    }
-    
-    // No cache or expired, fetch from API
-    console.log(`Fetching fresh CO2 intensity data from API for ${region}`)
-    const response = await fetch(apiUrl, {
-      headers: {
-        'auth-token': apiToken,
-      },
-    })
-    
-    if (!response.ok) {
-      console.log(response)
-      throw new Error(`API request failed with status ${response.status}`)
-    }
-    
-    const data = await response.json()
-    
-    // Transform the data to match the desired schema
-    const transformedData = data.history.map((item: RawHistoryItem): TransformedHistoryItem => ({
-      region: item.zone,
-      created_at: item.datetime,
-      intensity: item.carbonIntensity,
-    }))
-    
-    // Cache the transformed data
-    await redis.set(cacheKey, transformedData, { ex: CACHE_TTL })
-    
-    return NextResponse.json(transformedData)
+    return NextResponse.json(combinedData);
   } catch (error) {
     console.error('Error fetching CO2 intensity data:', error)
     return NextResponse.json(

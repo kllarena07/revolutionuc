@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 
 const MapContainer = dynamic(
@@ -23,6 +23,18 @@ const Popup = dynamic(
   { ssr: false }
 );
 
+// Import GeoJSON component dynamically
+const GeoJSON = dynamic(
+  () => import('react-leaflet').then((mod) => mod.GeoJSON),
+  { ssr: false }
+);
+
+// Import useMap hook for controlling the map
+const useMap = dynamic(
+  () => import('react-leaflet').then((mod) => mod.useMap),
+  { ssr: false }
+);
+
 // Import Leaflet only on client-side
 let L: any;
 if (typeof window !== 'undefined') {
@@ -38,6 +50,7 @@ interface ServerData {
   lng: number;
   intensity: number;
   provider: string;
+  zone: string;
 }
 
 interface CarbonData {
@@ -52,25 +65,58 @@ interface ForecastData {
   intensity: number;
 }
 
+interface GeoJSONFeature {
+  type: string;
+  properties: {
+    name: string;
+    zone?: string;
+  };
+  geometry: {
+    type: string;
+    coordinates: any[];
+  };
+}
+
+// Component to handle map zoom when region is selected
+const MapController = ({ selectedServer }: { selectedServer: ServerData | null }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (selectedServer && map) {
+      // Access the actual Leaflet map instance and use its methods
+      const leafletMap = map._leafletMap || map;
+      if (leafletMap && typeof leafletMap.setView === 'function') {
+        leafletMap.setView(
+          [selectedServer.lat, selectedServer.lng], 
+          5, 
+          { animate: true, duration: 1.5 }
+        );
+      }
+    }
+  }, [selectedServer, map]);
+  
+  return null;
+};
+
 const CarbonFootprintDashboard = () => {
   const [modelSize, setModelSize] = useState('medium');
   const [location, setLocation] = useState('europe');
   const [optimizations, setOptimizations] = useState<string[]>(['quantization', 'pruning']);
   const [serverData, setServerData] = useState<ServerData[]>([
-    { id: 'us-east', name: 'US East', lat: 40.7128, lng: -74.0060, intensity: 420, provider: 'AWS' },
-    { id: 'us-west', name: 'US West', lat: 37.7749, lng: -122.4194, intensity: 320, provider: 'GCP' },
-    { id: 'eu-west', name: 'EU West', lat: 48.8566, lng: 2.3522, intensity: 210, provider: 'Azure' },
-    { id: 'eu-north', name: 'EU North', lat: 59.3293, lng: 18.0686, intensity: 110, provider: 'AWS' },
-    { id: 'asia-east', name: 'Asia East', lat: 35.6762, lng: 139.6503, intensity: 550, provider: 'GCP' },
-    { id: 'asia-south', name: 'Asia South', lat: 1.3521, lng: 103.8198, intensity: 480, provider: 'Azure' }
+    { id: 'us-east', name: 'US East (Virginia)', lat: 38.9072, lng: -77.0369, intensity: 420, provider: 'AWS', zone: 'US-MIDA-PJM' },
+    { id: 'us-west', name: 'US West (California)', lat: 37.7749, lng: -122.4194, intensity: 320, provider: 'GCP', zone: 'US-CAL-CISO' },
+    { id: 'us-northwest', name: 'US Northwest (Oregon)', lat: 45.5051, lng: -122.6750, intensity: 280, provider: 'AWS', zone: 'US-NW-PACW' },
+    { id: 'eu-west', name: 'EU West (London)', lat: 51.5074, lng: -0.1278, intensity: 210, provider: 'Azure', zone: 'GB' },
+    { id: 'asia-east', name: 'Asia East (Hong Kong)', lat: 22.3193, lng: 114.1694, intensity: 550, provider: 'GCP', zone: 'HK' }
   ]);
   const [selectedServer, setSelectedServer] = useState<ServerData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('map');
   const [isClient, setIsClient] = useState(false);
+  const [geoJSONData, setGeoJSONData] = useState<GeoJSONFeature[]>([]);
+  const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
 
   const [forecastData, setForecastData] = useState<ForecastData[]>([]);
-  console.log(forecastData);
   
   // Create DefaultIcon only on client side
   const [defaultIcon, setDefaultIcon] = useState<any>(null);
@@ -79,6 +125,7 @@ const CarbonFootprintDashboard = () => {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       // Import the CSS inside the useEffect
+      // @ts-ignore
       import('leaflet/dist/leaflet.css');
       
       // Now we're safely on the client side
@@ -94,6 +141,103 @@ const CarbonFootprintDashboard = () => {
       setDefaultIcon(icon);
       L.Marker.prototype.options.icon = icon;
       setIsClient(true);
+      
+      // Load GeoJSON data for regions
+      fetch('/api/geojson')
+        .then(response => response.json())
+        .then(data => {
+          setGeoJSONData(data.features);
+        })
+        .catch(error => {
+          console.error('Error loading GeoJSON data:', error);
+          // Fallback to simplified GeoJSON data
+          setGeoJSONData([
+            {
+              type: "Feature",
+              properties: { name: "Virginia", zone: "US-MIDA-PJM" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [-83.6754, 36.5407], [-83.3755, 37.2024], [-82.9344, 37.5311], [-82.5951, 37.8779], 
+                  [-81.9673, 38.1930], [-81.5262, 38.4169], [-80.8565, 38.5513], [-80.2988, 38.3510], 
+                  [-79.7673, 38.2701], [-79.0876, 38.0803], [-78.4143, 38.2065], [-77.8346, 38.3774], 
+                  [-77.4353, 38.6835], [-77.0569, 38.9344], [-76.9141, 38.8929], [-76.5859, 38.2065], 
+                  [-76.2421, 37.9571], [-76.3628, 37.5575], [-76.5421, 37.2157], [-76.3353, 36.9454], 
+                  [-76.0550, 36.8513], [-75.8672, 36.5510], [-75.9975, 36.5510], [-76.4531, 36.5510], 
+                  [-77.1475, 36.5510], [-77.8346, 36.5510], [-78.7988, 36.5510], [-79.6729, 36.5407], 
+                  [-80.5029, 36.5407], [-81.3755, 36.5407], [-82.2954, 36.5407], [-83.6754, 36.5407]
+                ]]
+              }
+            },
+            {
+              type: "Feature",
+              properties: { name: "California", zone: "US-CAL-CISO" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [-124.4096, 42.0095], [-124.2065, 41.9583], [-123.6255, 42.0095], [-123.1555, 42.0095], 
+                  [-122.5195, 42.0095], [-121.9297, 42.0095], [-121.2305, 42.0095], [-120.6201, 41.9959],
+                  [-120.0024, 41.9959], [-119.9988, 41.1836], [-119.9988, 40.4534], [-120.0061, 39.7988],
+                  [-120.0061, 39.0021], [-120.0024, 38.2471], [-120.0024, 37.5555], [-119.9988, 36.9946],
+                  [-119.9988, 36.4032], [-119.9988, 35.7959], [-119.9988, 35.0049], [-120.0024, 34.5642],
+                  [-120.0024, 34.0195], [-120.2539, 33.7207], [-120.5005, 33.4375], [-120.7837, 33.3398],
+                  [-121.0010, 33.2544], [-121.4648, 33.5156], [-121.9043, 33.7573], [-122.2461, 34.1455],
+                  [-122.5073, 34.5081], [-122.7539, 34.7461], [-123.0054, 35.0049], [-123.2568, 35.4980],
+                  [-123.5059, 36.0046], [-123.7573, 36.5625], [-123.9990, 37.2485], [-124.1235, 37.6416],
+                  [-124.2065, 38.0591], [-124.2896, 38.5156], [-124.3652, 39.0021], [-124.3896, 39.5068],
+                  [-124.4096, 40.0000], [-124.3408, 40.5151], [-124.2065, 41.0037], [-124.3066, 41.5088],
+                  [-124.4096, 42.0095]
+                ]]
+              }
+            },
+            {
+              type: "Feature",
+              properties: { name: "Oregon", zone: "US-NW-PACW" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [-124.5664, 46.2991], [-124.2432, 46.2991], [-124.0137, 45.7693], [-123.9111, 45.5278],
+                  [-123.4619, 45.7085], [-123.1787, 45.9521], [-122.8955, 45.9033], [-122.3853, 45.7046],
+                  [-121.9971, 45.6558], [-121.5356, 45.6069], [-121.2177, 45.7046], [-121.0840, 45.6069],
+                  [-120.6519, 45.7571], [-120.1611, 45.6558], [-119.6094, 45.8569], [-119.0576, 45.9033],
+                  [-118.9856, 45.9998], [-117.9602, 45.9033], [-116.9165, 45.9998], [-116.4633, 45.9998],
+                  [-116.4633, 44.9636], [-116.4633, 43.8509], [-116.4633, 42.8155], [-116.4633, 41.9918],
+                  [-117.1387, 41.9918], [-118.0078, 41.9918], [-119.3555, 41.9918], [-120.6689, 41.9918],
+                  [-122.0825, 41.9918], [-123.1982, 41.9918], [-124.5664, 41.9918], [-124.5664, 43.4541],
+                  [-124.5664, 44.5278], [-124.5664, 46.2991]
+                ]]
+              }
+            },
+            {
+              type: "Feature",
+              properties: { name: "Great Britain", zone: "GB" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [-5.7, 49.9], [-5.5, 50.1], [-4.9, 50.4], [-4.2, 51.2], [-5.3, 51.6], [-4.8, 52.0],
+                  [-4.5, 52.8], [-3.6, 53.4], [-3.1, 53.4], [-2.9, 53.8], [-3.6, 54.6], [-3.4, 55.0],
+                  [-2.7, 55.8], [-2.0, 56.0], [-2.5, 56.5], [-3.3, 56.8], [-2.4, 57.5], [-1.8, 57.6],
+                  [-2.0, 58.6], [-1.2, 58.4], [-0.2, 58.3], [0.2, 57.8], [0.3, 56.7], [0.5, 56.0],
+                  [1.5, 55.0], [1.8, 53.5], [1.4, 52.9], [1.6, 52.1], [1.3, 51.7], [1.4, 51.2],
+                  [0.7, 50.8], [0.0, 50.5], [-0.5, 50.1], [-1.9, 50.0], [-2.6, 50.2], [-3.6, 50.2],
+                  [-4.3, 50.3], [-5.7, 49.9]
+                ]]
+              }
+            },
+            {
+              type: "Feature",
+              properties: { name: "Hong Kong", zone: "HK" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [113.8, 22.1], [113.9, 22.2], [114.0, 22.3], [114.1, 22.4], [114.2, 22.5],
+                  [114.3, 22.5], [114.4, 22.4], [114.3, 22.3], [114.2, 22.2], [114.1, 22.1],
+                  [114.0, 22.1], [113.9, 22.1], [113.8, 22.1]
+                ]]
+              }
+            }
+          ]);
+        });
     }
   }, []);
   
@@ -102,45 +246,99 @@ const CarbonFootprintDashboard = () => {
     // No need to set isClient here as it's handled in the Leaflet initialization
   }, []);
   
-  // Simulated API call to get CO2Signal data
-  const fetchCarbonData = () => {
+  // Fetch carbon intensity data from API
+  const fetchCarbonData = async () => {
     setIsLoading(true);
     
-    // Simulate API delay
-    setTimeout(async () => {
-      // Fetch real carbon intensity data from our API
-      try {
-        // Get forecast data from our history API
-        const forecastResponse = await fetch('/api/history', {
-          headers: {
-            'x-region': 'US-SW-PNM'
-          }
-        });
-        if (!forecastResponse.ok) {
-          throw new Error('Failed to fetch forecast data');
-        }
-        const forecastResult = await forecastResponse.json();
-        setForecastData(forecastResult);
-        
-        // Update server data with some randomization for demonstration
-        const updatedData = serverData.map(server => ({
-          ...server,
-          intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
-        }));
-        
-        setServerData(updatedData);
-      } catch (error) {
-        console.error('Error fetching carbon data:', error);
-        // Fall back to random data if API fails
-        const updatedData = serverData.map(server => ({
-          ...server,
-          intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
-        }));
-        
-        setServerData(updatedData);
+    try {
+      // Fetch all regions' data from our history API
+      const response = await fetch('/api/history');
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch carbon intensity data');
       }
+      
+      const allRegionsData = await response.json();
+      
+      // Group data by region
+      const dataByRegion: Record<string, ForecastData[]> = {};
+      allRegionsData.forEach((item: ForecastData) => {
+        if (!dataByRegion[item.region]) {
+          dataByRegion[item.region] = [];
+        }
+        dataByRegion[item.region].push(item);
+      });
+      
+      // Update server data with the latest intensity values from each region
+      const updatedServerData = serverData.map(server => {
+        const regionData = dataByRegion[server.zone];
+        if (regionData && regionData.length > 0) {
+          // Sort by created_at to get the latest entry
+          const sortedData = [...regionData].sort((a, b) => 
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          return {
+            ...server,
+            intensity: sortedData[0].intensity
+          };
+        }
+        return server;
+      });
+      
+      setServerData(updatedServerData);
+      
+      // Set forecast data for the first server or selected server
+      if (selectedServer) {
+        const selectedRegionData = dataByRegion[selectedServer.zone];
+        if (selectedRegionData) {
+          setForecastData(selectedRegionData);
+        }
+      } else if (updatedServerData.length > 0) {
+        const firstRegionData = dataByRegion[updatedServerData[0].zone];
+        if (firstRegionData) {
+          setForecastData(firstRegionData);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error fetching carbon data:', error);
+      // Fall back to random data if API fails
+      const updatedData = serverData.map(server => ({
+        ...server,
+        intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
+      }));
+      
+      setServerData(updatedData);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
+  };
+
+  // Fetch forecast data for a specific region
+  const fetchForecastForRegion = async (zone: string) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/history');
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch forecast data for zone: ${zone}`);
+      }
+      
+      const allRegionsData = await response.json();
+      
+      // Filter data for the selected region
+      const regionData = allRegionsData.filter((item: ForecastData) => item.region === zone);
+      
+      if (regionData.length > 0) {
+        setForecastData(regionData);
+      } else {
+        console.warn(`No data found for zone: ${zone}`);
+      }
+    } catch (error) {
+      console.error(`Error fetching carbon data for zone ${zone}:`, error);
+    } finally {
+      setIsLoading(false);
+    }
   };
   
   // Mock data for the visualization
@@ -201,6 +399,73 @@ const CarbonFootprintDashboard = () => {
     });
   };
   
+  // Get GeoJSON style based on region
+  const getGeoJSONStyle = (feature: any) => {
+    const zone = feature.properties.zone;
+    const server = serverData.find(s => s.zone === zone);
+    const isHovered = hoveredRegion === zone;
+    const isSelected = selectedServer?.zone === zone;
+    
+    let fillColor = "#3f3f46"; // Default zinc-700
+    let weight = 1;
+    let opacity = 0.7;
+    let fillOpacity = 0.2;
+    
+    if (server) {
+      if (server.intensity < 200) fillColor = "#10B981"; // green-500
+      else if (server.intensity < 350) fillColor = "#FBBF24"; // yellow-500
+      else if (server.intensity < 500) fillColor = "#F97316"; // orange-500
+      else fillColor = "#EF4444"; // red-500
+    }
+    
+    if (isHovered) {
+      weight = 2;
+      opacity = 1;
+      fillOpacity = 0.4;
+    }
+    
+    if (isSelected) {
+      weight = 3;
+      opacity = 1;
+      fillOpacity = 0.5;
+    }
+    
+    return {
+      fillColor,
+      color: "#ffffff",
+      weight,
+      opacity,
+      fillOpacity
+    };
+  };
+  
+  // Event handlers for GeoJSON features
+  const onEachFeature = (feature: any, layer: any) => {
+    const zone = feature.properties.zone;
+    
+    layer.on({
+      mouseover: () => {
+        setHoveredRegion(zone);
+      },
+      mouseout: () => {
+        setHoveredRegion(null);
+      },
+      click: () => {
+        const server = serverData.find(s => s.zone === zone);
+        if (server) {
+          setSelectedServer(server);
+          fetchForecastForRegion(zone);
+        }
+      }
+    });
+  };
+  
+  // Handle server selection from the list
+  const handleServerSelect = (server: ServerData) => {
+    setSelectedServer(server);
+    fetchForecastForRegion(server.zone);
+  };
+  
   // Find the greenest server
   const greenestServer = [...serverData].sort((a, b) => a.intensity - b.intensity)[0];
   
@@ -242,18 +507,34 @@ const CarbonFootprintDashboard = () => {
                 maxBoundsViscosity={1.0}
                 zoomControl={false}
                 attributionControl={false}
-                minZoom={4}
+                minZoom={2}
               >
                 <TileLayer
                   url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
                 />
+                
+                {/* Map controller for zooming to selected region */}
+                <MapController selectedServer={selectedServer} />
+                
+                {/* GeoJSON overlays for regions */}
+                {geoJSONData.map((feature, index) => (
+                  <GeoJSON 
+                    key={`geojson-${index}`}
+                    data={feature}
+                    style={() => getGeoJSONStyle(feature)}
+                    onEachFeature={onEachFeature}
+                  />
+                ))}
+                
                 {serverData.map(server => (
                   <Marker 
                     key={server.id} 
                     position={[server.lat, server.lng]} 
+                    icon={getIntensityIcon(server.intensity)}
                     eventHandlers={{
                       click: () => {
                         setSelectedServer(server);
+                        fetchForecastForRegion(server.zone);
                       },
                     }}
                   >
