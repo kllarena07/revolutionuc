@@ -2,58 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { motion, AnimatePresence, animate } from 'framer-motion';
 
-// We no longer need these dynamic imports since we're using require in the MapWrapper
-// const MapContainer = dynamic(
-//   () => import("react-leaflet").then((mod) => mod.MapContainer),
-//   { ssr: false }
-// );
-
-// const TileLayer = dynamic(
-//   () => import("react-leaflet").then((mod) => mod.TileLayer),
-//   { ssr: false }
-// );
-
-// const Marker = dynamic(
-//   () => import("react-leaflet").then((mod) => mod.Marker),
-//   { ssr: false }
-// );
-
-// const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), {
-//   ssr: false,
-// });
-
-// // Import GeoJSON component dynamically
-// const GeoJSON = dynamic(
-//   () => import('react-leaflet').then((mod) => mod.GeoJSON),
-//   { ssr: false }
-// );
-
-// // We'll create a MapController component that will be rendered inside the MapContainer
-// // and will handle zooming to the selected server
-// const MapControllerComponent = dynamic(
-//   () => import('react-leaflet').then((mod) => {
-//     // Create a component that uses the useMap hook
-//     const MapController = ({ selectedServer }: { selectedServer: ServerData | null }) => {
-//       const map = mod.useMap();
-//       
-//       React.useEffect(() => {
-//         if (selectedServer && map) {
-//           map.setView(
-//             [selectedServer.lat, selectedServer.lng], 
-//             5, 
-//             { animate: true, duration: 1.5 }
-//           );
-//         }
-//       }, [selectedServer, map]);
-//       
-//       return null;
-//     };
-//     
-//     return MapController;
-//   }),
-//   { ssr: false }
-// );
 
 // Import Leaflet only on client-side
 let L: any;
@@ -116,7 +66,7 @@ const MapWrapper = ({ children, selectedServer, isClientSide }: {
       if (selectedServer && map) {
         map.setView(
           [selectedServer.lat, selectedServer.lng], 
-          5, 
+          4, 
           { animate: true, duration: 1.5 }
         );
       }
@@ -176,6 +126,83 @@ const CarbonFootprintDashboard = () => {
   
   // Create DefaultIcon only on client side
   const [defaultIcon, setDefaultIcon] = useState<any>(null);
+
+  // Add new state for animation and live data simulation
+  const [isLiveMode, setIsLiveMode] = useState(true); // Set to true by default
+  const [liveUpdateInterval, setLiveUpdateInterval] = useState<NodeJS.Timeout | null>(null);
+  const [dataUpdateTimestamp, setDataUpdateTimestamp] = useState<Date | null>(null);
+  const [animatedIntensity, setAnimatedIntensity] = useState<number | null>(null);
+  
+  // Add new state for idle animations
+  const [animationTimestamp, setAnimationTimestamp] = useState(new Date());
+  const [randomMetrics, setRandomMetrics] = useState({
+    cpuUsage: Math.floor(Math.random() * 30) + 10,
+    memoryUsage: Math.floor(Math.random() * 40) + 30,
+    networkTraffic: Math.floor(Math.random() * 50) + 20
+  });
+  
+  // Update random metrics periodically for idle animations
+  useEffect(() => {
+    const idleAnimationInterval = setInterval(() => {
+      setAnimationTimestamp(new Date());
+      setRandomMetrics({
+        cpuUsage: Math.max(5, Math.min(80, randomMetrics.cpuUsage + (Math.random() - 0.5) * 10)),
+        memoryUsage: Math.max(20, Math.min(90, randomMetrics.memoryUsage + (Math.random() - 0.5) * 8)),
+        networkTraffic: Math.max(10, Math.min(100, randomMetrics.networkTraffic + (Math.random() - 0.5) * 15))
+      });
+    }, 3000);
+    
+    return () => clearInterval(idleAnimationInterval);
+  }, [randomMetrics]);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (liveUpdateInterval) {
+        clearInterval(liveUpdateInterval);
+      }
+    };
+  }, [liveUpdateInterval]);
+
+  // Function to start live updates
+  function startLiveUpdates() {
+    if (liveUpdateInterval) {
+      clearInterval(liveUpdateInterval);
+    }
+    
+    setIsLiveMode(true);
+    setDataUpdateTimestamp(new Date());
+    
+    // Update data every 5 seconds
+    const interval = setInterval(async () => {
+      try {
+        // Fetch real data from API instead of simulating
+        await fetchCarbonData();
+        setDataUpdateTimestamp(new Date());
+        
+        // If a server is selected, update its forecast data too
+        if (selectedServer) {
+          await fetchForecastForRegion(selectedServer.zone);
+          
+          // Animate the current intensity value
+          setAnimatedIntensity(serverData.find(s => s.id === selectedServer.id)?.intensity || null);
+        }
+      } catch (error) {
+        console.error("Error in live update interval:", error);
+      }
+    }, 5000);
+    
+    setLiveUpdateInterval(interval);
+  }
+  
+  // Function to stop live updates
+  function stopLiveUpdates() {
+    if (liveUpdateInterval) {
+      clearInterval(liveUpdateInterval);
+      setLiveUpdateInterval(null);
+    }
+    setIsLiveMode(false);
+  }
 
   // Initialize Leaflet-related items only on client side
   useEffect(() => {
@@ -298,6 +325,9 @@ const CarbonFootprintDashboard = () => {
         const firstServer = serverData[0];
         fetchForecastForRegion(firstServer.zone);
       }
+      
+      // Start live updates by default
+      startLiveUpdates();
     });
   }, []);
   
@@ -480,9 +510,27 @@ const CarbonFootprintDashboard = () => {
     if (intensity >= 350 && intensity < 500) color = "#F97316"; // orange
     if (intensity >= 500) color = "#EF4444"; // red
 
+    // Create a pulsing animation for the markers
+    const pulseAnimation = `
+      @keyframes pulse {
+        0% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.2); opacity: 0.8; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+    `;
+
+    // Add the animation style to the document if it doesn't exist
+    if (!document.getElementById('marker-animations')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'marker-animations';
+      styleEl.innerHTML = pulseAnimation;
+      document.head.appendChild(styleEl);
+    }
+
+    // Create the marker with animation
     return L.divIcon({
       className: "custom-div-icon",
-      html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">${
+      html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px; animation: pulse 2s infinite ease-in-out;">${
         intensity < 200 ? "✓" : ""
       }</div>`,
       iconSize: [20, 20],
@@ -544,17 +592,17 @@ const CarbonFootprintDashboard = () => {
       click: () => {
         const server = serverData.find(s => s.zone === zone);
         if (server) {
-          setSelectedServer(server);
-          fetchForecastForRegion(zone);
+          handleServerSelect(server);
         }
       }
     });
   };
   
-  // Handle server selection from the list
+  // Handle server selection with animation
   const handleServerSelect = (server: ServerData) => {
     setSelectedServer(server);
     fetchForecastForRegion(server.zone);
+    setAnimatedIntensity(server.intensity);
   };
   
   // Find the greenest server
@@ -594,29 +642,80 @@ const CarbonFootprintDashboard = () => {
             Minimize the carbon footprint of your large language models
           </p>
         </div>
-        <div className="flex space-x-2">
-          <button
-            className={`px-3 py-1 rounded-md text-sm ${
-              activeTab === "map"
-                ? "bg-green-600 text-white"
-                : "bg-green-800 text-zinc-300"
-            }`}
-            onClick={() => setActiveTab("map")}
-          >
-            Global Map
-          </button>
-          <button
-            className={`px-3 py-1 rounded-md text-sm ${
-              activeTab === "config"
-                ? "bg-green-600 text-white"
-                : "bg-green-800 text-zinc-300"
-            }`}
-            onClick={() => setActiveTab("config")}
-          >
-            Configuration
-          </button>
+        <div className="flex items-center space-x-4">
+          {/* Add animated system status indicators */}
+          <div className="hidden md:flex items-center space-x-3 mr-4 text-xs">
+            <motion.div 
+              className="flex items-center"
+              animate={{ opacity: [0.7, 1, 0.7] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1"></div>
+              <span className="text-green-400">System Online</span>
+            </motion.div>
+            <motion.div 
+              className="flex items-center"
+              initial={{ opacity: 0.8 }}
+              animate={{ opacity: [0.8, 1, 0.8] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1"></div>
+              <span className="text-blue-400">CPU: {Math.round(randomMetrics.cpuUsage)}%</span>
+            </motion.div>
+            <motion.div 
+              className="flex items-center"
+              initial={{ opacity: 0.8 }}
+              animate={{ opacity: [0.8, 1, 0.8] }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mr-1"></div>
+              <span className="text-purple-400">MEM: {Math.round(randomMetrics.memoryUsage)}%</span>
+            </motion.div>
+          </div>
+          
+          <div className="flex space-x-2">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`px-3 py-1 rounded-md text-sm ${
+                activeTab === "map"
+                  ? "bg-green-600 text-white"
+                  : "bg-green-800 text-zinc-300"
+              }`}
+              onClick={() => setActiveTab("map")}
+            >
+              Global Map
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`px-3 py-1 rounded-md text-sm ${
+                activeTab === "config"
+                  ? "bg-green-600 text-white"
+                  : "bg-green-800 text-zinc-300"
+              }`}
+              onClick={() => setActiveTab("config")}
+            >
+              Configuration
+            </motion.button>
+          </div>
         </div>
       </header>
+
+      {/* Add a subtle animated border at the top with fixed animation properties */}
+      <motion.div 
+        className="h-0.5 bg-gradient-to-r from-green-600 via-blue-500 to-purple-600"
+        animate={{ 
+          backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"]
+        }}
+        transition={{ 
+          duration: 15, 
+          repeat: Infinity,
+          ease: "linear",
+          repeatType: "loop"
+        }}
+        style={{ backgroundSize: "200% 100%" }}
+      />
 
       <div className="flex-1 overflow-hidden flex">
         {/* Main content area with map and scheduler */}
@@ -653,8 +752,7 @@ const CarbonFootprintDashboard = () => {
                       icon={getIntensityIcon(server.intensity)}
                       eventHandlers={{
                         click: () => {
-                          setSelectedServer(server);
-                          fetchForecastForRegion(server.zone);
+                          handleServerSelect(server);
                         },
                       }}
                     />
@@ -664,29 +762,109 @@ const CarbonFootprintDashboard = () => {
             )}
 
             {/* Map Controls Overlay */}
-            <div className="absolute top-4 right-4 z-[1000]">
-              <button
+            <div className="absolute top-4 right-4 z-[1000] flex space-x-2">
+              {/* <motion.div
+                className="bg-green-600 text-white px-3 py-1 rounded-md text-sm flex items-center shadow-lg"
+              >
+                <motion.span 
+                  className="inline-block w-2 h-2 rounded-full bg-white mr-2"
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                />
+                Live Updates Enabled
+              </motion.div> */}
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm flex items-center shadow-lg"
                 onClick={fetchCarbonData}
                 disabled={isLoading}
               >
                 {isLoading ? "Updating..." : "Refresh Data"}
-              </button>
+              </motion.button>
+            </div>
+            
+            {/* Live update indicator */}
+            {isLiveMode && dataUpdateTimestamp && (
+              <div className="absolute bottom-4 right-4 z-[1000] bg-zinc-800 bg-opacity-80 text-zinc-200 text-xs px-3 py-1 rounded-md flex items-center shadow-lg">
+                <motion.div 
+                  className="w-2 h-2 rounded-full bg-green-500 mr-2"
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                />
+                <span>Live Mode • Last update: {dataUpdateTimestamp.toLocaleTimeString()}</span>
+              </div>
+            )}
+            
+            {/* Add floating data metrics */}
+            <div className="absolute top-4 left-4 z-[1000] bg-zinc-800 bg-opacity-70 text-zinc-200 text-xs p-2 rounded-md shadow-lg border border-zinc-700">
+              <div className="flex flex-col space-y-1">
+                <motion.div 
+                  className="flex justify-between items-center"
+                  initial={{ opacity: 0.8 }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 4, repeat: Infinity }}
+                >
+                  <span className="text-zinc-400 mr-2">Global Average:</span>
+                  <span className="font-medium">{Math.round(serverData.reduce((sum, server) => sum + server.intensity, 0) / serverData.length)} gCO₂/kWh</span>
+                </motion.div>
+                <motion.div 
+                  className="flex justify-between items-center"
+                  initial={{ opacity: 0.8 }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 4, repeat: Infinity, delay: 1 }}
+                >
+                  <span className="text-zinc-400 mr-2">Best Region:</span>
+                  <span className="font-medium text-green-400">{greenestServer?.intensity} gCO₂/kWh</span>
+                </motion.div>
+                <motion.div 
+                  className="flex justify-between items-center"
+                  initial={{ opacity: 0.8 }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 4, repeat: Infinity, delay: 2 }}
+                >
+                  <span className="text-zinc-400 mr-2">Network:</span>
+                  <span className="font-medium text-blue-400">{Math.round(randomMetrics.networkTraffic)} Mbps</span>
+                </motion.div>
+                <motion.div 
+                  className="flex justify-between items-center"
+                  initial={{ opacity: 0.8 }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 4, repeat: Infinity, delay: 3 }}
+                >
+                  <span className="text-zinc-400 mr-2">Last Scan:</span>
+                  <span className="font-medium">{animationTimestamp.toLocaleTimeString()}</span>
+                </motion.div>
+              </div>
             </div>
           </div>
 
           {/* Scheduler Section - Only visible when scheduler tab is active, takes 30% of height */}
           <div className="h-[30%] bg-zinc-800 p-4 overflow-y-auto border-t border-zinc-700">
             <div className="flex justify-between items-center mb-2">
-              <h2 className="text-lg font-semibold text-zinc-100">
+              <h2 className="text-lg font-semibold text-zinc-100 flex items-center">
+                <motion.span
+                  className="inline-block w-2 h-2 rounded-full bg-green-500 mr-2"
+                  animate={{ 
+                    scale: [1, 1.3, 1],
+                    opacity: [0.7, 1, 0.7]
+                  }}
+                  transition={{ 
+                    duration: 3,
+                    repeat: Infinity,
+                    repeatType: "reverse"
+                  }}
+                />
                 Green Scheduler
               </h2>
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
                 onClick={handleScheduleTraining}
               >
                 Schedule Training
-              </button>
+              </motion.button>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -697,20 +875,34 @@ const CarbonFootprintDashboard = () => {
                 <div className="h-20 bg-zinc-800 rounded-lg mb-1 relative border border-zinc-700">
                   {isLoading ? (
                     <div className="flex items-center justify-center h-full">
-                      <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-green-500"></div>
+                      <motion.div 
+                        className="rounded-full h-6 w-6 border-t-2 border-green-500"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      />
                     </div>
                   ) : (
                     <div className="relative w-full h-full p-2">
                       {forecastData.length > 0 ? (
                         <div className="absolute left-2 top-0 h-full flex flex-col justify-between text-xs text-zinc-300 pr-1">
-                          <span>
+                          <motion.span
+                            key={`max-${Math.max(...forecastData.map((d) => d.intensity))}`}
+                            initial={{ opacity: 0, x: -5 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.3 }}
+                          >
                             {Math.max(...forecastData.map((d) => d.intensity))}{" "}
                             gCO₂
-                          </span>
-                          <span>
+                          </motion.span>
+                          <motion.span
+                            key={`min-${Math.min(...forecastData.map((d) => d.intensity))}`}
+                            initial={{ opacity: 0, x: -5 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.3 }}
+                          >
                             {Math.min(...forecastData.map((d) => d.intensity))}{" "}
                             gCO₂
-                          </span>
+                          </motion.span>
                         </div>
                       ) : (
                         <div className="flex items-center justify-center h-full text-xs text-zinc-400">
@@ -788,7 +980,10 @@ const CarbonFootprintDashboard = () => {
                                   />
 
                                   {/* Area under the curve */}
-                                  <path
+                                  <motion.path
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 0.3 }}
+                                    transition={{ duration: 0.5 }}
                                     d={`
                                       M0,${scaleY(forecastData[0].intensity)}
                                       ${forecastData
@@ -808,7 +1003,10 @@ const CarbonFootprintDashboard = () => {
                                   />
 
                                   {/* Line chart - using path instead of polyline for consistent width */}
-                                  <path
+                                  <motion.path
+                                    initial={{ pathLength: 0, opacity: 0 }}
+                                    animate={{ pathLength: 1, opacity: 1 }}
+                                    transition={{ duration: 1, ease: "easeInOut" }}
                                     d={`
                                       M0,${scaleY(forecastData[0].intensity)}
                                       ${forecastData
@@ -832,8 +1030,15 @@ const CarbonFootprintDashboard = () => {
 
                                   {/* Data points */}
                                   {forecastData.map((data, index) => (
-                                    <circle
+                                    <motion.circle
                                       key={index}
+                                      initial={{ scale: 0 }}
+                                      animate={{ scale: 1 }}
+                                      transition={{ 
+                                        delay: index * 0.05, 
+                                        duration: 0.3,
+                                        type: "spring"
+                                      }}
                                       cx={`${
                                         (index / (forecastData.length - 1)) *
                                         100
@@ -1011,7 +1216,12 @@ const CarbonFootprintDashboard = () => {
                   Optimal Training Windows
                 </h3>
                 <div className="space-y-2">
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
+                  >
                     <div>
                       <p className="font-medium text-xs text-zinc-200">
                         Today, 3:00 AM - 7:00 AM
@@ -1023,9 +1233,14 @@ const CarbonFootprintDashboard = () => {
                     <div className="text-green-400 font-medium text-xs">
                       115 gCO<sub>2</sub>/kWh
                     </div>
-                  </div>
+                  </motion.div>
 
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.1 }}
+                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
+                  >
                     <div>
                       <p className="font-medium text-xs text-zinc-200">
                         Tomorrow, 2:00 AM - 6:00 AM
@@ -1035,7 +1250,7 @@ const CarbonFootprintDashboard = () => {
                     <div className="text-green-400 font-medium text-xs">
                       130 gCO<sub>2</sub>/kWh
                     </div>
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             </div>
@@ -1046,7 +1261,18 @@ const CarbonFootprintDashboard = () => {
         <div className="hidden md:block w-96 bg-zinc-800 shadow-lg overflow-y-auto">
           {activeTab === "config" && (
             <div className="p-4">
-              <h2 className="text-lg font-semibold mb-4 text-zinc-100">
+              <h2 className="text-lg font-semibold mb-4 text-zinc-100 flex items-center">
+                <motion.div
+                  className="inline-block w-3 h-3 rounded-full bg-blue-500 mr-2"
+                  animate={{ 
+                    boxShadow: [
+                      "0 0 0 rgba(59, 130, 246, 0)",
+                      "0 0 0 rgba(59, 130, 246, 0.4)",
+                      "0 0 0 rgba(59, 130, 246, 0)"
+                    ]
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
                 Model Configuration
               </h2>
 
@@ -1056,30 +1282,65 @@ const CarbonFootprintDashboard = () => {
                   <h3 className="font-medium text-zinc-200">
                     Carbon Footprint
                   </h3>
-                  <span className="bg-green-900 text-green-300 px-2 py-1 rounded-full text-xs font-medium">
+                  <motion.span 
+                    key={savingsPercentage}
+                    initial={{ scale: 0.8 }}
+                    animate={{ scale: 1 }}
+                    className="bg-green-900 text-green-300 px-2 py-1 rounded-full text-xs font-medium"
+                  >
                     {savingsPercentage}% Reduction
-                  </span>
+                  </motion.span>
                 </div>
 
                 <div className="flex space-x-2 mb-2">
-                  <div className="flex-1 bg-red-900 p-2 rounded-lg text-center">
+                  <motion.div 
+                    initial={{ height: 0 }}
+                    animate={{ height: "auto" }}
+                    transition={{ duration: 0.5 }}
+                    className="flex-1 bg-red-900 p-2 rounded-lg text-center"
+                  >
                     <p className="text-red-300 text-xs">Standard</p>
-                    <p className="text-sm font-bold text-red-200">
+                    <motion.p 
+                      key={currentData.baseline}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-sm font-bold text-red-200"
+                    >
                       {currentData.baseline} kg
-                    </p>
-                  </div>
-                  <div className="flex-1 bg-yellow-900 p-2 rounded-lg text-center">
+                    </motion.p>
+                  </motion.div>
+                  <motion.div 
+                    initial={{ height: 0 }}
+                    animate={{ height: "auto" }}
+                    transition={{ duration: 0.5, delay: 0.1 }}
+                    className="flex-1 bg-yellow-900 p-2 rounded-lg text-center"
+                  >
                     <p className="text-yellow-300 text-xs">Optimized</p>
-                    <p className="text-sm font-bold text-yellow-200">
+                    <motion.p 
+                      key={currentData.optimized}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-sm font-bold text-yellow-200"
+                    >
                       {currentData.optimized} kg
-                    </p>
-                  </div>
-                  <div className="flex-1 bg-green-900 p-2 rounded-lg text-center">
+                    </motion.p>
+                  </motion.div>
+                  <motion.div 
+                    initial={{ height: 0 }}
+                    animate={{ height: "auto" }}
+                    transition={{ duration: 0.5, delay: 0.2 }}
+                    className="flex-1 bg-green-900 p-2 rounded-lg text-center"
+                  >
                     <p className="text-green-300 text-xs">Green Energy</p>
-                    <p className="text-sm font-bold text-green-200">
+                    <motion.p 
+                      key={currentData.renewable}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-sm font-bold text-green-200"
+                    >
                       {currentData.renewable} kg
-                    </p>
-                  </div>
+                    </motion.p>
+                  </motion.div>
                 </div>
               </div>
 
@@ -1232,72 +1493,148 @@ const CarbonFootprintDashboard = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Add animated efficiency tips */}
+              <motion.div 
+                className="mt-6 p-3 border border-blue-800 bg-blue-900 bg-opacity-30 rounded-lg"
+                initial={{ opacity: 0.9, y: 5 }}
+                animate={{ 
+                  opacity: [0.9, 1, 0.9],
+                  y: [5, 0, 5]
+                }}
+                transition={{ 
+                  duration: 6,
+                  repeat: Infinity,
+                  repeatType: "reverse"
+                }}
+              >
+                <h3 className="text-sm font-medium text-blue-300 mb-1 flex items-center">
+                  <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9z" clipRule="evenodd" />
+                  </svg>
+                  Efficiency Tip
+                </h3>
+                <p className="text-xs text-blue-200">
+                  Training during low-carbon intensity periods can reduce emissions by up to 80% compared to peak hours.
+                </p>
+              </motion.div>
             </div>
           )}
 
           {activeTab === "map" && (
             <div className="p-4">
-              <h2 className="text-lg font-semibold mb-4 text-zinc-100">
+              <h2 className="text-lg font-semibold mb-4 text-zinc-100 flex items-center">
+                <motion.div
+                  className="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"
+                  animate={{ 
+                    boxShadow: [
+                      "0 0 0 rgba(16, 185, 129, 0)",
+                      "0 0 0 rgba(16, 185, 129, 0.4)",
+                      "0 0 0 rgba(16, 185, 129, 0)"
+                    ]
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
                 Server List
               </h2>
 
               {/* Selected server details - Integrated from popup */}
-              {selectedServer && (
-                <div className="p-3 border border-zinc-700 rounded-lg bg-zinc-700 mb-4">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-medium text-zinc-200">
-                      {selectedServer.name} Details
-                    </h3>
-                    <button
-                      className="text-zinc-400"
-                      onClick={() => setSelectedServer(null)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-zinc-400">Provider</p>
-                      <p className="font-medium text-zinc-200">
-                        {selectedServer.provider}
-                      </p>
+              <AnimatePresence>
+                {selectedServer && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    className="p-3 border border-zinc-700 rounded-lg bg-zinc-700 mb-4"
+                  >
+                    <div className="flex justify-between items-start">
+                      <h3 className="font-medium text-zinc-200">
+                        {selectedServer.name} Details
+                      </h3>
+                      <button
+                        className="text-zinc-400"
+                        onClick={() => setSelectedServer(null)}
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <div>
-                      <p className="text-sm text-zinc-400">Carbon Intensity</p>
-                      <p className="font-medium text-zinc-200">
-                        {selectedServer.intensity} gCO<sub>2</sub>/kWh
-                      </p>
+                    <div className="mt-2 grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-zinc-400">Provider</p>
+                        <p className="font-medium text-zinc-200">
+                          {selectedServer.provider}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-zinc-400">Carbon Intensity</p>
+                        <motion.p 
+                          key={selectedServer.intensity}
+                          initial={{ color: "#ffffff" }}
+                          animate={{ color: selectedServer.intensity < 200 ? "#10B981" : 
+                                           selectedServer.intensity < 350 ? "#FBBF24" : 
+                                           selectedServer.intensity < 500 ? "#F97316" : "#EF4444" }}
+                          className="font-medium text-zinc-200"
+                        >
+                          {animatedIntensity !== null ? (
+                            <motion.span
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              key={animatedIntensity}
+                            >
+                              {animatedIntensity}
+                            </motion.span>
+                          ) : (
+                            selectedServer.intensity
+                          )} gCO<sub>2</sub>/kWh
+                        </motion.p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-zinc-400">Location</p>
+                        <p className="font-medium text-zinc-200">
+                          {selectedServer.lat.toFixed(2)},{" "}
+                          {selectedServer.lng.toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-zinc-400">Estimated Savings</p>
+                        <motion.p 
+                          key={Math.round((550 - selectedServer.intensity) / 5.5)}
+                          initial={{ scale: 0.9 }}
+                          animate={{ scale: 1 }}
+                          className="font-medium text-green-500"
+                        >
+                          {Math.round((550 - selectedServer.intensity) / 5.5)}%
+                          vs. worst region
+                        </motion.p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm text-zinc-400">Location</p>
-                      <p className="font-medium text-zinc-200">
-                        {selectedServer.lat.toFixed(2)},{" "}
-                        {selectedServer.lng.toFixed(2)}
-                      </p>
+                    <div className="mt-2">
+                      <button className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm">
+                        Schedule Training on This Server
+                      </button>
                     </div>
-                    <div>
-                      <p className="text-sm text-zinc-400">Estimated Savings</p>
-                      <p className="font-medium text-green-500">
-                        {Math.round((550 - selectedServer.intensity) / 5.5)}%
-                        vs. worst region
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <button className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm">
-                      Schedule Training on This Server
-                    </button>
-                  </div>
-                </div>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Recommended server section */}
-              <div className="p-3 bg-zinc-700 rounded-lg mb-4">
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="p-3 bg-zinc-700 rounded-lg mb-4"
+              >
                 <h3 className="font-medium mb-1 text-zinc-200">
                   Recommended Server
                 </h3>
                 {greenestServer && (
-                  <div className="flex items-center justify-between">
+                  <motion.div 
+                    className="flex items-center justify-between"
+                    initial={{ x: -10, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  >
                     <div>
                       <span className="font-medium text-zinc-200">
                         {greenestServer.name}
@@ -1307,21 +1644,35 @@ const CarbonFootprintDashboard = () => {
                       </p>
                     </div>
                     <div className="flex items-center">
-                      <div
+                      <motion.div
                         className={`w-3 h-3 rounded-full ${getIntensityColor(
                           greenestServer.intensity
                         )} mr-2`}
-                      ></div>
+                        animate={{ 
+                          scale: [1, 1.2, 1],
+                          opacity: [1, 0.8, 1]
+                        }}
+                        transition={{ 
+                          duration: 2,
+                          repeat: Infinity,
+                          repeatType: "reverse"
+                        }}
+                      ></motion.div>
                       <span className="font-medium text-zinc-200">
                         {greenestServer.intensity} gCO<sub>2</sub>/kWh
                       </span>
                     </div>
-                    <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
+                    <motion.button 
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
+                      onClick={() => handleServerSelect(greenestServer)}
+                    >
                       Select Server
-                    </button>
-                  </div>
+                    </motion.button>
+                  </motion.div>
                 )}
-              </div>
+              </motion.div>
 
               <div className="overflow-hidden rounded-lg border border-zinc-700">
                 <table className="min-w-full divide-y divide-zinc-700">
@@ -1341,22 +1692,31 @@ const CarbonFootprintDashboard = () => {
                   <tbody className="bg-zinc-800 divide-y divide-zinc-700">
                     {serverData
                       .sort((a, b) => a.intensity - b.intensity)
-                      .map((server) => (
-                        <tr
+                      .map((server, index) => (
+                        <motion.tr
                           key={server.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05, duration: 0.3 }}
                           className={`${
                             selectedServer?.id === server.id
                               ? "bg-zinc-700"
                               : ""
                           } cursor-pointer hover:bg-zinc-700`}
                           onClick={() => {
-                            setSelectedServer(server);
-                            fetchForecastForRegion(server.zone);
+                            handleServerSelect(server);
                           }}
                         >
                           <td className="px-3 py-2 whitespace-nowrap">
                             <div className="text-sm font-medium text-zinc-200">
                               {server.name}
+                              {isLiveMode && server.id === selectedServer?.id && (
+                                <motion.span 
+                                  className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-green-500"
+                                  animate={{ opacity: [1, 0.3, 1] }}
+                                  transition={{ duration: 1.5, repeat: Infinity }}
+                                />
+                              )}
                             </div>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
@@ -1371,26 +1731,203 @@ const CarbonFootprintDashboard = () => {
                                   server.intensity
                                 )} mr-2`}
                               ></div>
-                              <div className="text-sm text-zinc-200">
+                              <motion.div 
+                                key={server.intensity}
+                                className="text-sm text-zinc-200"
+                                initial={{ opacity: 0.7 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 0.3 }}
+                              >
                                 {server.intensity}
-                              </div>
+                              </motion.div>
+                              {isLiveMode && server.id === selectedServer?.id && (
+                                <motion.span 
+                                  className="ml-1 text-xs text-green-400"
+                                  initial={{ opacity: 0, x: -5 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  exit={{ opacity: 0, x: 5 }}
+                                >
+                                  live
+                                </motion.span>
+                              )}
                             </div>
                           </td>
-                        </tr>
+                        </motion.tr>
                       ))}
                   </tbody>
                 </table>
               </div>
+
+              {/* Add animated carbon savings counter */}
+              <motion.div 
+                className="mt-4 p-3 border border-green-800 bg-green-900 bg-opacity-30 rounded-lg"
+                initial={{ opacity: 0.9 }}
+                animate={{ 
+                  opacity: [0.9, 1, 0.9],
+                }}
+                transition={{ 
+                  duration: 4,
+                  repeat: Infinity,
+                  repeatType: "reverse"
+                }}
+              >
+                <h3 className="text-sm font-medium text-green-300 mb-1">Carbon Savings Tracker</h3>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-green-200">Potential Monthly Savings:</span>
+                  <motion.span 
+                    className="text-sm font-bold text-green-300"
+                    initial={{ opacity: 0.9 }}
+                    animate={{ 
+                      opacity: [0.9, 1, 0.9],
+                      scale: [1, 1.03, 1]
+                    }}
+                    transition={{ 
+                      duration: 3,
+                      repeat: Infinity,
+                      repeatType: "reverse"
+                    }}
+                  >
+                    {Math.round(550 - greenestServer?.intensity) * 24 * 30 / 1000} kg CO₂
+                  </motion.span>
+                </div>
+                <div className="w-full bg-green-800 bg-opacity-30 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <motion.div 
+                    className="h-full bg-green-500"
+                    initial={{ width: "0%" }}
+                    animate={{ width: `${Math.min(100, (550 - (greenestServer?.intensity || 0)) / 5.5)}%` }}
+                    transition={{ duration: 1.5, ease: "easeOut" }}
+                  />
+                </div>
+              </motion.div>
             </div>
           )}
 
           <div className="p-4 border-t border-zinc-700">
-            <button className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md">
-              Start Optimized Training
-            </button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md relative overflow-hidden group"
+            >
+              <span className="relative z-10">Start Optimized Training</span>
+              <motion.div 
+                className="absolute inset-0 bg-green-500 opacity-0 group-hover:opacity-20"
+                animate={{ 
+                  x: ["-100%", "100%"]
+                }}
+                transition={{ 
+                  duration: 1.5, 
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+              />
+            </motion.button>
+            
+            {/* Add animated status text */}
+            <motion.p 
+              className="text-center text-xs text-zinc-500 mt-2"
+              animate={{ opacity: [0.5, 0.8, 0.5] }}
+              transition={{ duration: 4, repeat: Infinity, repeatType: "reverse" }}
+            >
+              System ready • {new Date().toLocaleDateString()} • v1.2.0
+            </motion.p>
           </div>
         </div>
       </div>
+
+      {/* Notification system */}
+      <AnimatePresence>
+        {isLiveMode && dataUpdateTimestamp && (
+          <motion.div 
+            id="live-notification"
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="fixed bottom-4 left-4 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg p-3 max-w-xs z-50"
+          >
+            <div className="flex items-start">
+              <div className="flex-shrink-0 mt-0.5">
+                <motion.div 
+                  className="w-3 h-3 rounded-full bg-green-500"
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
+              </div>
+              {/* <div className="ml-3">
+                <h3 className="text-sm font-medium text-zinc-200">Live Dashboard Active</h3>
+                <p className="mt-1 text-xs text-zinc-400">
+                  Data is being updated in real-time from the API. Carbon intensity values reflect current grid conditions.
+                </p>
+              </div> */}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add floating particles with fixed animation properties */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        {[...Array(8)].map((_, i) => (
+          <motion.div
+            key={`particle-${i}`}
+            className="absolute w-2 h-2 rounded-full bg-green-500 opacity-20"
+            initial={{ 
+              x: `${Math.random() * 100}%`, 
+              y: `${Math.random() * 100}%`,
+              opacity: 0.1 + Math.random() * 0.2
+            }}
+            animate={{ 
+              x: [
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`
+              ],
+              y: [
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`, 
+                `${Math.random() * 100}%`
+              ],
+              opacity: [
+                0.1 + Math.random() * 0.2, 
+                0.1 + Math.random() * 0.2, 
+                0.1 + Math.random() * 0.2
+              ]
+            }}
+            transition={{ 
+              duration: 20 + Math.random() * 10,
+              repeat: Infinity,
+              ease: "linear"
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Loading indicator - non-intrusive version */}
+      <AnimatePresence>
+        {isLoading && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed bottom-4 right-4 z-[1000]"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-800 rounded-lg p-3 shadow-xl flex items-center space-x-3 border border-zinc-700"
+            >
+              <motion.div 
+                className="w-5 h-5 border-2 border-t-green-500 border-zinc-600 rounded-full"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              />
+              <p className="text-sm text-zinc-300">
+                Updating data...
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
