@@ -10,7 +10,19 @@ const redis = new Redis({
 
 const CACHE_KEY = 'co2-intensity-nyiso'
 const CACHE_TTL = 60 * 60 // 1 hour in seconds
-const API_URL = 'https://api.electricitymap.org/v3/carbon-intensity/history?zone=US-NY-NYIS'
+const getApiUrl = () => {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 1); // 24 hours ago
+  
+  const formatDate = (date: Date) => {
+    return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+  };
+  
+  return `https://api.electricitymap.org/v3/carbon-intensity/past-range?zone=US-NY-NYIS&start=${formatDate(start)}&end=${formatDate(end)}`;
+};
+
+const API_URL = getApiUrl();
 const API_KEY = process.env.NY_AUTH_TOKEN || ''
 
 type RawHistoryItem = {

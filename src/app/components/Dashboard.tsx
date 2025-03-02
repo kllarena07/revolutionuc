@@ -21,6 +21,12 @@ interface CarbonData {
   renewable: number;
 }
 
+interface ForecastData {
+  region: string;
+  created_at: string;
+  intensity: number;
+}
+
 const DefaultIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
@@ -48,21 +54,43 @@ const CarbonFootprintDashboard = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('map');
   const [isClient, setIsClient] = useState(false);
+
+  const [forecastData, setForecastData] = useState<ForecastData[]>([]);
+  console.log(forecastData);
   
   // Simulated API call to get CO2Signal data
   const fetchCarbonData = () => {
     setIsLoading(true);
     
     // Simulate API delay
-    setTimeout(() => {
-      // In a real implementation, this would call the CO2Signal API
-      // through your backend service
-      const updatedData = serverData.map(server => ({
-        ...server,
-        intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
-      }));
-      
-      setServerData(updatedData);
+    setTimeout(async () => {
+      // Fetch real carbon intensity data from our API
+      try {
+        // Get forecast data from our history API
+        const forecastResponse = await fetch('/api/history');
+        if (!forecastResponse.ok) {
+          throw new Error('Failed to fetch forecast data');
+        }
+        const forecastResult = await forecastResponse.json();
+        setForecastData(forecastResult);
+        
+        // Update server data with some randomization for demonstration
+        const updatedData = serverData.map(server => ({
+          ...server,
+          intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
+        }));
+        
+        setServerData(updatedData);
+      } catch (error) {
+        console.error('Error fetching carbon data:', error);
+        // Fall back to random data if API fails
+        const updatedData = serverData.map(server => ({
+          ...server,
+          intensity: server.intensity + (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 30)
+        }));
+        
+        setServerData(updatedData);
+      }
       setIsLoading(false);
     }, 1000);
   };
@@ -219,22 +247,97 @@ const CarbonFootprintDashboard = () => {
                 <div>
                   <h3 className="font-medium mb-2 text-zinc-200 text-sm">Carbon Intensity Forecast</h3>
                   <div className="h-20 bg-zinc-700 rounded-lg mb-1 relative">
-                    {/* Simple line chart representing 24-hour forecast */}
-                    <svg viewBox="0 0 24 100" className="w-full h-full">
-                      <polyline 
-                        points="0,70 1,65 2,60 3,62 4,50 5,45 6,40 7,45 8,50 9,55 10,60 11,50 12,45 13,50 14,55 15,65 16,70 17,75 18,70 19,65 20,60 21,55 22,50 23,45 24,40" 
-                        fill="none" 
-                        stroke="#10B981" 
-                        strokeWidth="2" 
-                      />
-                      <line x1="0" y1="0" x2="0" y2="100" stroke="#71717A" strokeWidth="1" />
-                      <line x1="0" y1="100" x2="24" y2="100" stroke="#71717A" strokeWidth="1" />
-                    </svg>
+                    {isLoading ? (
+                      <div className="flex items-center justify-center h-full">
+                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-green-500"></div>
+                      </div>
+                    ) : (
+                      <div className="relative w-full h-full">
+                        <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
+                          {forecastData.length > 0 && (
+                            <>
+                              <polyline 
+                                points={forecastData.map((data, index) => 
+                                  `${(index / (forecastData.length - 1)) * 100},${100 - (data.intensity / 6)}`
+                                ).join(' ')}
+                                fill="none" 
+                                stroke="#10B981" 
+                                strokeWidth="2" 
+                              />
+                              <line x1="0" y1="0" x2="0" y2="100" stroke="#71717A" strokeWidth="1" />
+                              <line x1="0" y1="100" x2="100" y2="100" stroke="#71717A" strokeWidth="1" />
+                              
+                              {forecastData.map((data, index) => (
+                                <circle 
+                                  key={index}
+                                  cx={`${(index / (forecastData.length - 1)) * 100}`}
+                                  cy={`${100 - (data.intensity / 6)}`}
+                                  r="2"
+                                  fill="#10B981"
+                                  className="hover:r-3 transition-all duration-200 cursor-pointer"
+                                />
+                              ))}
+                            </>
+                          )}
+                        </svg>
+                        <div 
+                          id="carbon-tooltip" 
+                          className="absolute bg-zinc-900 text-white text-xs p-2 rounded shadow-lg z-10 pointer-events-none"
+                          style={{ display: 'none', transform: 'translate(-50%, -100%)' }}
+                        ></div>
+                        {forecastData.length > 0 && forecastData.map((data, index) => (
+                          <div 
+                            key={index}
+                            className="absolute w-4 h-4 cursor-pointer"
+                            style={{
+                              left: `${(index / (forecastData.length - 1)) * 100}%`,
+                              top: `${100 - (data.intensity / 6)}%`,
+                              transform: 'translate(-50%, -50%)'
+                            }}
+                            onMouseOver={(e) => {
+                              const tooltip = document.getElementById('carbon-tooltip');
+                              if (tooltip) {
+                                const date = new Date(data.created_at);
+                                const formattedDate = date.toLocaleTimeString();
+                                tooltip.innerHTML = `${data.intensity} gCO<sub>2</sub>/kWh<br/>${formattedDate}`;
+                                
+                                // Get the position relative to the chart container
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                
+                                // Position the tooltip above the data point
+                                tooltip.style.left = `${(index / (forecastData.length - 1)) * 100}%`;
+                                tooltip.style.top = `${100 - (data.intensity / 6) - 10}%`;
+                                
+                                tooltip.style.display = 'block';
+                              }
+                            }}
+                            onMouseOut={() => {
+                              const tooltip = document.getElementById('carbon-tooltip');
+                              if (tooltip) {
+                                tooltip.style.display = 'none';
+                              }
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-between text-xs text-zinc-400">
-                    <span>Now</span>
-                    <span>12h</span>
-                    <span>24h</span>
+                    {forecastData.length > 0 && (
+                      <>
+                        <span>{new Date(forecastData[forecastData.length - 1].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        <span>{forecastData.length > Math.floor(forecastData.length / 2) && 
+                          new Date(forecastData[Math.floor(forecastData.length / 2)].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        <span>{new Date(forecastData[0].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      </>
+                    )}
+                    {forecastData.length === 0 && (
+                      <>
+                        <span>Now</span>
+                        <span>12h</span>
+                        <span>24h</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 
