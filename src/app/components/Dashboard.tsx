@@ -47,18 +47,6 @@ interface GeoJSONFeature {
   };
 }
 
-// Training job state interfaces
-interface TrainingJob {
-  jobId?: string;
-  jobName?: string;
-  status?: string;
-  startTime?: string;
-  endTime?: string;
-  outputs?: Array<{key: string, size: number}>;
-  failureReason?: string;
-  logInfo?: {url: string};
-}
-
 // Create a wrapper component for the map to handle the Leaflet-specific props
 const MapWrapper = ({ children, selectedServer, isClientSide }: { 
   children: React.ReactNode, 
@@ -119,7 +107,6 @@ const CarbonFootprintDashboard = () => {
   const [optimizations, setOptimizations] = useState<string[]>([
     "quantization",
     "pruning",
-    "distillation",
   ]);
   const [serverData, setServerData] = useState<ServerData[]>([
     { id: 'us-east', name: 'US East (Virginia)', lat: 38.9072, lng: -77.0369, intensity: 420, provider: 'AWS', zone: 'US-MIDA-PJM' },
@@ -154,24 +141,6 @@ const CarbonFootprintDashboard = () => {
     networkTraffic: Math.floor(Math.random() * 50) + 20
   });
   
-  // Training job and upload modal state
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [trainingFile, setTrainingFile] = useState<File | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [trainingJob, setTrainingJob] = useState<TrainingJob | null>(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
-  const [statusInterval, setStatusInterval] = useState<NodeJS.Timeout | null>(null);
-
-  // Clean up interval on unmount
-  useEffect(() => {
-    return () => {
-      if (statusInterval) {
-        clearInterval(statusInterval);
-      }
-    };
-  }, [statusInterval]);
-
   // Update random metrics periodically for idle animations
   useEffect(() => {
     const idleAnimationInterval = setInterval(() => {
@@ -641,247 +610,25 @@ const CarbonFootprintDashboard = () => {
     (a, b) => a.intensity - b.intensity
   )[0];
 
-  // Handle file upload logic
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const selectedFile = e.target.files[0];
-      if (selectedFile.name.endsWith('.ipynb')) {
-        setTrainingFile(selectedFile);
-        setUploadError(null);
-      } else {
-        setTrainingFile(null);
-        setUploadError('Please select a valid Jupyter notebook (.ipynb) file');
-      }
-    }
-  };
-
-  const handleUploadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!trainingFile) {
-      setUploadError('Please select a notebook file first');
-      return;
-    }
-    
-    setIsUploading(true);
-    setUploadError(null);
-    setTrainingJob(null);
-    
-    try {
-      const formData = new FormData();
-      formData.append('notebook', trainingFile);
-      
-      const response = await fetch('/api/warren-run', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to upload notebook');
-      }
-      
-      setTrainingJob(data);
-      
-      // Start polling for job status
-      if (data.jobName) {
-        const interval = setInterval(async () => {
-          await checkJobStatus(data.jobName);
-        }, 10000); // Check every 10 seconds
-        
-        setStatusInterval(interval);
-      }
-      
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'An unknown error occurred');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const checkJobStatus = async (jobName: string) => {
-    if (!jobName || checkingStatus) return;
-    
-    setCheckingStatus(true);
-    
-    try {
-      const response = await fetch(`/api/job-status?jobName=${encodeURIComponent(jobName)}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to check job status');
-      }
-      
-      setTrainingJob((prev) => prev ? { ...prev, ...data } : data);
-      
-      // If job is completed or failed, stop polling
-      if (data.status === 'Completed' || data.status === 'Failed' || data.status === 'Stopped') {
-        if (statusInterval) {
-          clearInterval(statusInterval);
-          setStatusInterval(null);
-        }
-      }
-      
-    } catch (err) {
-      console.error('Error checking job status:', err);
-    } finally {
-      setCheckingStatus(false);
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Completed':
-        return 'bg-green-100 text-green-800';
-      case 'Failed':
-      case 'Stopped':
-        return 'bg-red-100 text-red-800';
-      case 'InProgress':
-      case 'processing':
-        return 'bg-blue-100 text-blue-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  // Update the handleScheduleTraining function to show the upload modal
+  //call the OpenAI API key
   const handleScheduleTraining = async () => {
-    setShowUploadModal(true);
-  };
+    try {
+      const response = await fetch("/api/openai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          prompt: "Write a haiku about AI",
+        }),
+      });
 
-  // Notebook Upload Modal Component
-  const NotebookUploadModal = () => {
-    if (!showUploadModal) return null;
-    
-    return (
-      <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
-        <div className="bg-zinc-800 p-6 rounded-lg shadow-xl max-w-md w-full">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-zinc-200">Upload Training Notebook</h2>
-            <button 
-              onClick={() => setShowUploadModal(false)}
-              className="text-zinc-400 hover:text-zinc-200"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          
-          {!trainingJob ? (
-            <form onSubmit={handleUploadSubmit}>
-              <div className="mb-4">
-                <label className="block mb-2 text-sm font-medium text-zinc-300">
-                  Select Notebook File
-                </label>
-                <input
-                  type="file"
-                  accept=".ipynb"
-                  onChange={handleFileChange}
-                  className="block w-full text-sm text-zinc-400
-                           file:mr-4 file:py-2 file:px-4
-                           file:rounded file:border-0
-                           file:text-sm file:font-semibold
-                           file:bg-blue-600 file:text-zinc-200
-                           hover:file:bg-blue-700"
-                />
-                {trainingFile && (
-                  <p className="mt-1 text-sm text-zinc-400">
-                    Selected: {trainingFile.name}
-                  </p>
-                )}
-              </div>
-              
-              <button
-                type="submit"
-                disabled={!trainingFile || isUploading}
-                className={`w-full py-2 px-4 rounded font-medium text-white
-                          ${!trainingFile || isUploading 
-                            ? 'bg-zinc-600 cursor-not-allowed' 
-                            : 'bg-blue-600 hover:bg-blue-700'}`}
-              >
-                {isUploading ? 'Uploading...' : 'Upload and Run Notebook'}
-              </button>
-              
-              {uploadError && (
-                <div className="mt-4 p-3 bg-red-900/40 text-red-400 rounded">
-                  <p>{uploadError}</p>
-                </div>
-              )}
-            </form>
-          ) : (
-            <div className="text-zinc-300">
-              <h3 className="font-bold mb-2">Job Information</h3>
-              <p className="mt-2">Job ID: {trainingJob.jobId}</p>
-              <p className="mt-1">Job Name: {trainingJob.jobName}</p>
-              
-              {trainingJob.status && (
-                <p className="mt-2">
-                  Status: 
-                  <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${getStatusColor(trainingJob.status)}`}>
-                    {trainingJob.status}
-                  </span>
-                </p>
-              )}
-              
-              {trainingJob.startTime && (
-                <p className="mt-1">Started: {new Date(trainingJob.startTime).toLocaleString()}</p>
-              )}
-              
-              {trainingJob.endTime && (
-                <p className="mt-1">Completed: {new Date(trainingJob.endTime).toLocaleString()}</p>
-              )}
-              
-              {trainingJob.outputs && trainingJob.outputs.length > 0 && (
-                <div className="mt-3">
-                  <h4 className="font-semibold">Output Files:</h4>
-                  <ul className="mt-1 text-sm">
-                    {trainingJob.outputs.map((output: any, index: number) => (
-                      <li key={index} className="mt-1">
-                        {output.key.split('/').pop()} - {(output.size / 1024).toFixed(2)} KB
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              
-              {trainingJob.status === 'Completed' && (
-                <p className="mt-3 text-green-400">
-                  Notebook execution completed successfully!
-                </p>
-              )}
-              
-              {trainingJob.status === 'Failed' && (
-                <div className="mt-3">
-                  <p className="text-red-400 font-medium">Notebook execution failed.</p>
-                  {trainingJob.failureReason && (
-                    <p className="mt-1 text-sm text-red-400">
-                      Reason: {trainingJob.failureReason}
-                    </p>
-                  )}
-                </div>
-              )}
-              
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={() => {
-                    setShowUploadModal(false);
-                    if (statusInterval) {
-                      clearInterval(statusInterval);
-                      setStatusInterval(null);
-                    }
-                  }}
-                  className="px-4 py-2 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+      const data = await response.json();
+      console.log(data);
+    } catch (error) {
+      console.error("Error calling OpenAI API:", error);
+    }
   };
 
   return (
@@ -2060,7 +1807,6 @@ const CarbonFootprintDashboard = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md relative overflow-hidden group"
-              onClick={handleScheduleTraining}
             >
               <span className="relative z-10">Start Optimized Training</span>
               <motion.div 
@@ -2182,8 +1928,6 @@ const CarbonFootprintDashboard = () => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <NotebookUploadModal />
     </div>
   );
 };
