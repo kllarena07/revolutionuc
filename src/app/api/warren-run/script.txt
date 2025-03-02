@@ -1,181 +1,422 @@
+#!/bin/bash
+set -e
+
+# Install required packages
+pip install nbconvert ipykernel matplotlib scikit-learn boto3 awscli
+
+# Set up environment variables
+JOB_ID=$(echo $AWS_PROCESSING_JOB_NAME | cut -d'-' -f3-)
+S3_LOG_PATH="s3://current-sagemaker-notebooks/logs/${JOB_ID}/cell_output.log"
+LOCAL_LOG_FILE="/tmp/notebook_output.log"
+
+# Set up output directory
+OUTPUT_DIR=/opt/ml/processing/output
+mkdir -p $OUTPUT_DIR
+
+# Find the notebook file in the input directory
+NOTEBOOK_DIR=/opt/ml/processing/input/notebook
+NOTEBOOK_FILE=$(find $NOTEBOOK_DIR -name "*.ipynb" | head -1)
+
+if [ -z "$NOTEBOOK_FILE" ]; then
+  echo "Error: No notebook file found in $NOTEBOOK_DIR" | tee -a $LOCAL_LOG_FILE
+  aws s3 cp $LOCAL_LOG_FILE $S3_LOG_PATH
+  exit 1
+fi
+
+echo "Using notebook file: $NOTEBOOK_FILE" | tee -a $LOCAL_LOG_FILE
+aws s3 cp $LOCAL_LOG_FILE $S3_LOG_PATH
+
+# Function to upload logs to S3 in real-time
+upload_logs() {
+  aws s3 cp $LOCAL_LOG_FILE $S3_LOG_PATH
+}
+
+# Set up a background process to upload logs every 3 seconds
+(
+  while true; do
+    upload_logs
+    sleep 3
+  done
+) &
+UPLOAD_PID=$!
+
+# Convert notebook to Python script
+echo "Converting notebook to Python script..." | tee -a $LOCAL_LOG_FILE
+jupyter nbconvert --to script "$NOTEBOOK_FILE" --output /tmp/converted_notebook
+upload_logs
+
+# Execute the converted script with output capturing
+echo "Executing notebook..." | tee -a $LOCAL_LOG_FILE
+{
+  python /tmp/converted_notebook.py 2>&1 | tee -a $LOCAL_LOG_FILE
+} || {
+  echo "Error executing notebook script. See above for details." | tee -a $LOCAL_LOG_FILE
+}
+
+# Final upload of logs
+upload_logs
+
+# Stop the background upload process
+kill $UPLOAD_PID
+
+# Copy output files to the output directory
+cp $LOCAL_LOG_FILE $OUTPUT_DIR/
+echo "Notebook execution completed. Logs available at $S3_LOG_PATH" | tee -a $LOCAL_LOG_FILE
+upload_logs
+
+exit 0
+
+#!/bin/bash
+set -e
+
+# Install required packages
+pip install nbconvert ipykernel matplotlib scikit-learn boto3 jupyter
+
+# Set up directories
+OUTPUT_DIR="/opt/ml/processing/output"
+NOTEBOOK_DIR="/opt/ml/processing/input/notebook"
+LOG_FILE="/tmp/notebook_output.log"
+S3_LOG_PATH="s3://${S3_BUCKET}/logs/${JOB_ID}/notebook-output.log"
+
+mkdir -p "${OUTPUT_DIR}"
+
+# Find notebook file
+NOTEBOOK_FILE=$(find "${NOTEBOOK_DIR}" -name "*.ipynb" | head -1)
+if [ -z "${NOTEBOOK_FILE}" ]; then
+  echo "Error: No notebook file found in ${NOTEBOOK_DIR}"
+  exit 1
+fi
+
+echo "Using notebook: ${NOTEBOOK_FILE}"
+
+# Function to upload log to S3
+upload_log() {
+  aws s3 cp "${LOG_FILE}" "${S3_LOG_PATH}"
+}
+
+# Set up trap to ensure final upload on exit
+trap upload_log EXIT
+
+# Convert notebook to Python script
+jupyter nbconvert --to script "${NOTEBOOK_FILE}" --output /tmp/converted_notebook
+
+# Execute the script with output streaming to S3
+{
+  # Start timestamp
+  echo "=== NOTEBOOK EXECUTION STARTED AT $(date) ===" > "${LOG_FILE}"
+  
+  # Run the notebook in background and capture output
+  python /tmp/converted_notebook.py 2>&1 | tee -a "${LOG_FILE}" &
+  PID=$!
+  
+  # Stream logs to S3 every few seconds while the notebook is running
+  while kill -0 $PID 2>/dev/null; do
+    upload_log
+    sleep 3
+  done
+  
+  # Wait for execution to complete
+  wait $PID
+  EXIT_CODE=$?
+  
+  # Add end timestamp
+  echo "=== NOTEBOOK EXECUTION FINISHED AT $(date) WITH EXIT CODE ${EXIT_CODE} ===" >> "${LOG_FILE}"
+  
+  # Final upload
+  upload_log
+  
+  # Copy any generated output files to the output directory
+  cp -r /tmp/* "${OUTPUT_DIR}" 2>/dev/null || true
+  
+  exit ${EXIT_CODE}
+} &
+
+# Wait for the execution to complete
+wait $!
+exit_code=$?
+
+echo "Script completed with exit code: ${exit_code}"
+exit ${exit_code}
+
+#!/bin/bash
+set -e
+
+# Configuration
+JOB_ID=${1:-"default-job-id"}
+S3_BUCKET=${2:-"current-sagemaker-notebooks"}
+S3_PREFIX="logs/${JOB_ID}"
+LOG_FILE="/tmp/notebook_output.log"
+UPLOAD_INTERVAL=2  # Seconds between uploads
+OUTPUT_DIR="/opt/ml/processing/output"
+NOTEBOOK_DIR="/opt/ml/processing/input/notebook"
+
+# Install required packages
+echo "Installing required packages..."
+pip install nbconvert ipykernel matplotlib scikit-learn boto3 awscli
+
+# Set up directories
+mkdir -p $OUTPUT_DIR
+
+# Initialize log file
+echo "Notebook execution started at $(date)" > $LOG_FILE
+
+# Find the notebook file
+NOTEBOOK_FILE=$(find $NOTEBOOK_DIR -name "*.ipynb" | head -1)
+if [ -z "$NOTEBOOK_FILE" ]; then
+  echo "Error: No notebook file found in $NOTEBOOK_DIR" | tee -a $LOG_FILE
+  aws s3 cp $LOG_FILE s3://$S3_BUCKET/$S3_PREFIX/execution.log
+  exit 1
+fi
+
+echo "Using notebook file: $NOTEBOOK_FILE" | tee -a $LOG_FILE
+
+# Function to upload the log file to S3
+upload_log() {
+  aws s3 cp $LOG_FILE s3://$S3_BUCKET/$S3_PREFIX/execution.log
+}
+
+# Start background process to continuously upload logs
+(
+  LAST_SIZE=0
+  while true; do
+    CURRENT_SIZE=$(wc -c < $LOG_FILE)
+    if [ "$CURRENT_SIZE" -ne "$LAST_SIZE" ]; then
+      upload_log
+      LAST_SIZE=$CURRENT_SIZE
+    fi
+    sleep $UPLOAD_INTERVAL
+  done
+) &
+UPLOAD_PID=$!
+
+# Trap to ensure the background process is killed when the script exits
+trap "kill $UPLOAD_PID 2>/dev/null" EXIT
+
+# Convert notebook to Python script
+echo "Converting notebook to Python script..." | tee -a $LOG_FILE
+jupyter nbconvert --to script "$NOTEBOOK_FILE" --output /tmp/converted_notebook 2>&1 | tee -a $LOG_FILE
+
+# Execute the converted script with output redirection
+echo "Executing notebook..." | tee -a $LOG_FILE
+python /tmp/converted_notebook.py 2>&1 | tee -a $LOG_FILE
+
+# If we get here, execution completed
+echo "Notebook execution completed at $(date)" | tee -a $LOG_FILE
+
+# Final upload
+upload_log
+
+# Copy any output files to output directory
+find /tmp -type f -name "*.png" -o -name "*.csv" -o -name "*.json" | while read file; do
+  cp "$file" $OUTPUT_DIR/
+done
+
+# Upload all output files to S3
+aws s3 sync $OUTPUT_DIR s3://$S3_BUCKET/$S3_PREFIX/outputs/
+
+echo "All outputs uploaded to S3://$S3_BUCKET/$S3_PREFIX/" | tee -a $LOG_FILE
+upload_log
+
+exit 0
+
+#!/bin/bash
+
+set -e
+
+# Install required dependencies
+pip install nbconvert ipykernel matplotlib scikit-learn boto3 awscli
+
+# Set up directories
+output_dir=/opt/ml/processing/output
+mkdir -p $output_dir
+notebook_dir=/opt/ml/processing/input/notebook
+log_dir=/tmp/notebook_logs
+mkdir -p $log_dir
+
+# Extract bucket and job ID from environment variables
+S3_BUCKET=$S3_BUCKET_NAME
+JOB_ID=$PROCESSING_JOB_ID
+
+# Function to update logs to S3
+update_s3_log() {
+    local log_file=$1
+    local s3_path=$2
+    
+    # Upload the log to S3
+    aws s3 cp $log_file $s3_path
+    
+    echo "Uploaded logs to $s3_path"
+}
+
+# Find the notebook file
+notebook_file=$(find $notebook_dir -name "*.ipynb" | head -1)
+
+if [ -z "$notebook_file" ]; then
+    echo "Error: No notebook file found in $notebook_dir"
+    exit 1
+fi
+
+echo "Using notebook file: $notebook_file"
+
+# Set up log files
+execution_log="$log_dir/execution.log"
+cell_output_log="$log_dir/cell_output.log"
+
+# Initialize log files
+echo "Notebook execution started at $(date)" > $execution_log
+echo "" > $cell_output_log
+
+# First update to S3
+update_s3_log $execution_log "s3://$S3_BUCKET/logs/$JOB_ID/execution.log"
+update_s3_log $cell_output_log "s3://$S3_BUCKET/logs/$JOB_ID/cell_output.log"
+
+# Convert notebook to Python script
+jupyter nbconvert --to script "$notebook_file" --output /tmp/converted_notebook >> $execution_log 2>&1
+
+echo "Starting notebook execution at $(date)" >> $execution_log
+update_s3_log $execution_log "s3://$S3_BUCKET/logs/$JOB_ID/execution.log"
+
+# Execute the converted script with output streaming
+{
+    # Start output redirection to both the terminal and the log file using tee
+    python /tmp/converted_notebook.py 2>&1 | tee -a $cell_output_log
+    
+    # Capture the exit code
+    exit_code=${PIPESTATUS[0]}
+    
+    # Log the completion
+    echo "Notebook execution completed at $(date) with exit code $exit_code" >> $execution_log
+    
+    # Final update to S3
+    update_s3_log $execution_log "s3://$S3_BUCKET/logs/$JOB_ID/execution.log"
+    update_s3_log $cell_output_log "s3://$S3_BUCKET/logs/$JOB_ID/cell_output.log"
+    
+    # Ensure the script exits with the correct code
+    exit $exit_code
+} &
+
+# Set up background process to periodically upload logs to S3
+while true; do
+    # Check if the background process is still running
+    if ! jobs %1 > /dev/null 2>&1; then
+        # Process is done, exit the loop
+        break
+    fi
+    
+    # Upload current logs to S3
+    update_s3_log $execution_log "s3://$S3_BUCKET/logs/$JOB_ID/execution.log"
+    update_s3_log $cell_output_log "s3://$S3_BUCKET/logs/$JOB_ID/cell_output.log"
+    
+    # Sleep for a few seconds
+    sleep 5
+done
+
+# Wait for the execution to complete
+wait
+
+# Copy the output files to the processing output directory
+cp $execution_log $output_dir/
+cp $cell_output_log $output_dir/
+
+echo "All logs have been uploaded to S3 and copied to the output directory"
+
 #!/usr/bin/env python3
 import os
 import sys
-import traceback
-import nbformat
-from nbconvert.preprocessors import ExecutePreprocessor
+import time
+import json
+import uuid
+import datetime
+import threading
 import subprocess
+import nbformat
+from io import StringIO
+from contextlib import contextmanager
+from nbconvert.preprocessors import ExecutePreprocessor
 
-# Configure paths
-input_dir = '/opt/ml/processing/input/notebook'
-output_dir = '/opt/ml/processing/output'
-os.makedirs(output_dir, exist_ok=True)
-
-# Set up local logging (stdout logs will be captured by CloudWatch)
-log_file = os.path.join(output_dir, 'execution_log.txt')
-
-# Set up Supabase client if environment variables are provided
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        from supabase import create_client, Client
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        print(f"Error initializing Supabase client: {e}", flush=True)
-        supabase = None
-else:
-    supabase = None
-
-def log_message(message):
-    # Print to stdout (CloudWatch captures these)
-    print(message, flush=True)
-    # Append to local log file
-    with open(log_file, 'a') as f:
-        f.write(f"{message}\n")
-    # Insert into Supabase table if client is available
-    if supabase:
-        try:
-            # Insert a new record into the "execution_logs" table
-            # Adjust the payload as necessary to match your table schema.
-            response = supabase.table("execution_logs").insert({"message": message}).execute()
-        except Exception as e:
-            print(f"Error inserting log to Supabase: {e}", flush=True)
-
-# Subclass ExecutePreprocessor to stream cell outputs as they occur
-class StreamingExecutePreprocessor(ExecutePreprocessor):
-    def preprocess_cell(self, cell, resources, index):
-        cell, resources = super().preprocess_cell(cell, resources, index)
-        if 'outputs' in cell:
-            for output in cell['outputs']:
-                if output.get('output_type') == 'stream':
-                    text = output.get('text', '')
-                    log_message(f"Cell {index} stream output: {text.strip()}")
-                elif output.get('output_type') == 'execute_result':
-                    data = output.get('data', {})
-                    text = data.get('text/plain', '')
-                    log_message(f"Cell {index} execute result: {text.strip()}")
-                elif output.get('output_type') == 'error':
-                    ename = output.get('ename', '')
-                    evalue = output.get('evalue', '')
-                    log_message(f"Cell {index} error: {ename} - {evalue}")
-        return cell, resources
-
-log_message("Starting script execution")
-
-# Check for a Python script (.py) in the input directory
-script_files = [f for f in os.listdir(input_dir) if f.endswith('.py')]
-if script_files:
-    script_file = script_files[0]
-    script_path = os.path.join(input_dir, script_file)
-    log_message(f"Found Python script: {script_path}")
-    try:
-        result = subprocess.run(['python', script_path], capture_output=True, text=True)
-        log_message("Script output:")
-        log_message(result.stdout)
-        if result.stderr:
-            log_message("Script errors:")
-            log_message(result.stderr)
-    except Exception as e:
-        log_message(f"Error executing script: {str(e)}")
-        sys.exit(1)
-else:
-    log_message("No Python script found. Falling back to notebook execution.")
-
-    # Find the notebook file
-    notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
-    if not notebook_files:
-        log_message("No notebook files found in input directory")
-        sys.exit(1)
-
-    notebook_file = notebook_files[0]
-    input_path = os.path.join(input_dir, notebook_file)
-    log_message(f"Found notebook: {input_path}")
-
-    try:
-        # Load the notebook
-        log_message("Loading notebook...")
-        with open(input_path) as f:
-            nb = nbformat.read(f, as_version=4)
-
-        # Set up kernel spec
-        if 'metadata' not in nb:
-            nb['metadata'] = {}
-        nb['metadata']['kernelspec'] = {
-            'display_name': 'Python 3',
-            'language': 'python',
-            'name': 'python3'
-        }
-
-        # Execute notebook using the streaming preprocessor
-        log_message("Executing notebook with streaming cell outputs...")
-        ep = StreamingExecutePreprocessor(timeout=1800, kernel_name='python3')
-        ep.preprocess(nb, {'metadata': {'path': '.'}})
-
-        # Save executed notebook
-        output_notebook = os.path.join(output_dir, notebook_file)
-        with open(output_notebook, 'w', encoding='utf-8') as f:
-            nbformat.write(nb, f)
-
-        log_message(f"Notebook execution completed successfully and saved to: {output_notebook}")
-
-    except Exception as e:
-        error_message = f"Error executing notebook: {str(e)}"
-        log_message(error_message)
-
-        # Try to save the partial results
-        try:
-            output_notebook = os.path.join(output_dir, f"partial_{notebook_file}")
-            with open(output_notebook, 'w', encoding='utf-8') as f:
-                nbformat.write(nb, f)
-            log_message(f"Saved partial results to {output_notebook}")
-        except Exception as save_error:
-            log_message(f"Could not save partial results: {str(save_error)}")
-
-        # Create detailed error log
-        error_log = os.path.join(output_dir, 'error_details.txt')
-        with open(error_log, 'w') as f:
-            f.write(traceback.format_exc())
-
-        sys.exit(1)
-
-# Create additional diagnostics for debugging
-log_message("Creating diagnostics...")
-
-# Save environment variables
 try:
-    env_file = os.path.join(output_dir, 'environment.txt')
-    with open(env_file, 'w') as f:
-        f.write("Container environment:\n")
-        for key, value in os.environ.items():
-            f.write(f"{key}={value}\n")
-    log_message("Environment variables saved")
-except Exception as e:
-    log_message(f"Error saving environment variables: {str(e)}")
+    import boto3
+except ImportE# Find the notebook file
+notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
+if not notebook_files:
+    update_s3_log("No notebook files found in input directory", status="FAILED")
+    sys.exit(1)
 
-# Save package list
+notebook_file = notebook_files[0]
+input_path = os.path.join(input_dir, notebook_file)
+update_s3_log(f"Found notebook: {input_path}")
+
+# Create a custom output capture for notebooks
+class OutputCapture:
+    def __init__(self):
+        self.outputs = []
+
+    def publish_output(self, output):
+        """Capture output from the notebook cells"""
+        if hasattr(output, 'text'):
+            self.outputs.append(output.text)
+            update_s3_log(output.text)
+        elif hasattr(output, 'data') and 'text/plain' in output.data:
+            self.outputs.append(output.data['text/plain'])
+            update_s3_log(output.data['text/plain'])
+        else:
+            # Try to get a string representation
+            output_str = str(output)
+            if output_str and output_str != "None":
+                self.outputs.append(output_str)
+                update_s3_log(output_str)
+
+# Override stdout and stderr to capture output
+@contextmanager
+def capture_output():
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    stdout_io = StringIO()
+    stderr_io = StringIO()
+    sys.stdout, sys.stderr = stdout_io, stderr_io
+    
+    try:
+        yield (stdout_io, stderr_io)
+    finally:
+        sys.stdout, sys.stderr = old_stdout, old_stderr
+        
+        # Get output
+        stdout_value = stdout_io.getvalue()
+        stderr_value = stderr_io.getvalue()
+        
+        # Log both outputs if they exist
+        if stdout_value:
+            update_s3_log(f"STDOUT: {stdout_value.strip()}")
+        if stderr_value:
+            update_s3_log(f"STDERR: {stderr_value.strip()}")
 try:
-    packages_file = os.path.join(output_dir, 'packages.txt')
-    with open(packages_file, 'w') as f:
-        f.write("Installed Python packages:\n")
-        result = subprocess.run(['pip', 'list'], capture_output=True, text=True)
-        f.write(result.stdout)
-    log_message("Package list saved")
-except Exception as e:
-    log_message(f"Error saving package list: {str(e)}")
+    # Load the notebook
+    print("Loading notebook...")
+    with open(input_path) as f:
+        nb = nbformat.read(f, as_version=4)
 
-# Save notebook metadata (if available)
-try:
-    meta_file = os.path.join(output_dir, 'notebook_metadata.txt')
-    with open(meta_file, 'w') as f:
-        f.write("Notebook metadata:\n")
-        try:
-            for key, value in nb.get('metadata', {}).items():
-                f.write(f"{key}: {value}\n")
-        except Exception:
-            f.write("No notebook metadata available.\n")
-    log_message("Notebook metadata saved")
-except Exception as e:
-    log_message(f"Error saving notebook metadata: {str(e)}")
+    # Set up kernel spec
+    if 'metadata' not in nb:
+        nb['metadata'] = {}
+    nb['metadata']['kernelspec'] = {
+        'display_name': 'Python 3',
+        'language': 'python',
+        'name': 'python3'
+    }
 
-log_message("Execution complete")
+    # Execute notebook
+    print("Executing notebook...")
+    ep = ExecutePreprocessor(timeout=1800, kernel_name='python3')
+    ep.preprocess(nb, {'metadata': {'path': '.'}})
+
+    # Save executed notebook
+    output_notebook = os.path.join(output_dir, notebook_file)
+    with open(output_notebook, 'w', encoding='utf-8') as f:
+        nbformat.write(nb, f)
+
+    print(f"Notebook execution completed and saved to: {output_notebook}")
+
+except Exception as e:
+    print(f"Error executing notebook: {str(e)}")
+    sys.exit(1)
+
+print("Conversion complete")
