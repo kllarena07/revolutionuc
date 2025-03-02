@@ -202,13 +202,11 @@ const CarbonFootprintDashboard = () => {
               >
                 <TileLayer
                   url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
-                  noWrap={true}
                 />
                 {serverData.map(server => (
                   <Marker 
                     key={server.id} 
                     position={[server.lat, server.lng]} 
-                    icon={getIntensityIcon(server.intensity)}
                     eventHandlers={{
                       click: () => {
                         setSelectedServer(server);
@@ -234,79 +232,167 @@ const CarbonFootprintDashboard = () => {
           </div>
           
           {/* Scheduler Section - Only visible when scheduler tab is active, takes 30% of height */}
-
-            <div className="h-[30%] bg-zinc-800 p-4 overflow-y-auto border-t border-zinc-700">
-              <div className="flex justify-between items-center mb-2">
-                <h2 className="text-lg font-semibold text-zinc-100">Green Scheduler</h2>
-                <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
-                  Schedule Training
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2 text-zinc-200 text-sm">Carbon Intensity Forecast</h3>
-                  <div className="h-20 bg-zinc-700 rounded-lg mb-1 relative">
-                    {isLoading ? (
-                      <div className="flex items-center justify-center h-full">
-                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-green-500"></div>
-                      </div>
-                    ) : (
-                      <div className="relative w-full h-full">
-                        <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
-                          {forecastData.length > 0 && (
-                            <>
-                              <polyline 
-                                points={forecastData.map((data, index) => 
-                                  `${(index / (forecastData.length - 1)) * 100},${100 - (data.intensity / 6)}`
-                                ).join(' ')}
-                                fill="none" 
-                                stroke="#10B981" 
-                                strokeWidth="2" 
-                              />
-                              <line x1="0" y1="0" x2="0" y2="100" stroke="#71717A" strokeWidth="1" />
-                              <line x1="0" y1="100" x2="100" y2="100" stroke="#71717A" strokeWidth="1" />
+          <div className="h-[30%] bg-zinc-800 p-4 overflow-y-auto border-t border-zinc-700">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-lg font-semibold text-zinc-100">Green Scheduler</h2>
+              <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
+                Schedule Training
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-medium mb-2 text-zinc-200 text-sm">Carbon Intensity Forecast</h3>
+                <div className="h-20 bg-zinc-800 rounded-lg mb-1 relative border border-zinc-700">
+                  {isLoading ? (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-green-500"></div>
+                    </div>
+                  ) : (
+                    <div className="relative w-full h-full p-2">
+                      {forecastData.length > 0 && (
+                        <div className="absolute left-2 top-0 h-full flex flex-col justify-between text-xs text-zinc-300 pr-1">
+                          <span>{Math.max(...forecastData.map(d => d.intensity))} gCO₂</span>
+                          <span>{Math.min(...forecastData.map(d => d.intensity))} gCO₂</span>
+                        </div>
+                      )}
+                      <svg viewBox="0 0 100 100" className="w-full h-full pl-8" preserveAspectRatio="none">
+                        {forecastData.length > 0 && (
+                          <>
+                            {(() => {
+                              const minIntensity = Math.min(...forecastData.map(d => d.intensity));
+                              const maxIntensity = Math.max(...forecastData.map(d => d.intensity));
+                              const range = maxIntensity - minIntensity;
+                              const padding = range * 0.1; // 10% padding
+                              const effectiveMin = Math.max(0, minIntensity - padding);
+                              const effectiveMax = maxIntensity + padding;
                               
-                              {forecastData.map((data, index) => (
-                                <circle 
-                                  key={index}
-                                  cx={`${(index / (forecastData.length - 1)) * 100}`}
-                                  cy={`${100 - (data.intensity / 6)}`}
-                                  r="2"
-                                  fill="#10B981"
-                                  className="hover:r-3 transition-all duration-200 cursor-pointer"
-                                />
-                              ))}
-                            </>
-                          )}
-                        </svg>
-                        <div 
-                          id="carbon-tooltip" 
-                          className="absolute bg-zinc-900 text-white text-xs p-2 rounded shadow-lg z-10 pointer-events-none"
-                          style={{ display: 'none', transform: 'translate(-50%, -100%)' }}
-                        ></div>
-                        {forecastData.length > 0 && forecastData.map((data, index) => (
+                              // Function to scale the y value
+                              const scaleY = (value: number) => 
+                                100 - ((value - effectiveMin) / (effectiveMax - effectiveMin) * 100);
+                              
+                              // Create horizontal grid lines
+                              const gridLines = [];
+                              for (let i = 0; i <= 4; i++) {
+                                const y = i * 25;
+                                gridLines.push(
+                                  <line 
+                                    key={`grid-${i}`} 
+                                    x1="0" 
+                                    y1={y} 
+                                    x2="100" 
+                                    y2={y} 
+                                    stroke="#3f3f46" 
+                                    strokeWidth="0.5" 
+                                    strokeDasharray="2,2" 
+                                  />
+                                );
+                              }
+                              
+                              return (
+                                <>
+                                  {/* Grid lines */}
+                                  {gridLines}
+                                  
+                                  {/* Axis lines */}
+                                  <line x1="0" y1="0" x2="0" y2="100" stroke="#71717A" strokeWidth="1" />
+                                  <line x1="0" y1="100" x2="100" y2="100" stroke="#71717A" strokeWidth="1" />
+                                  
+                                  {/* Area under the curve */}
+                                  <path 
+                                    d={`
+                                      M0,${scaleY(forecastData[0].intensity)}
+                                      ${forecastData.map((data, index) => 
+                                        `L${(index / (forecastData.length - 1)) * 100},${scaleY(data.intensity)}`
+                                      ).join(' ')}
+                                      L100,100 L0,100 Z
+                                    `}
+                                    fill="url(#greenGradient)" 
+                                    opacity="0.3" 
+                                  />
+                                  
+                                  {/* Line chart - using path instead of polyline for consistent width */}
+                                  <path 
+                                    d={`
+                                      M0,${scaleY(forecastData[0].intensity)}
+                                      ${forecastData.map((data, index) => 
+                                        `L${(index / (forecastData.length - 1)) * 100},${scaleY(data.intensity)}`
+                                      ).join(' ')}
+                                    `}
+                                    fill="none" 
+                                    stroke="#10B981" 
+                                    strokeWidth="1.5" 
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    vectorEffect="non-scaling-stroke"
+                                  />
+                                  
+                                  {/* Data points */}
+                                  {forecastData.map((data, index) => (
+                                    <circle 
+                                      key={index}
+                                      cx={`${(index / (forecastData.length - 1)) * 100}`}
+                                      cy={`${scaleY(data.intensity)}`}
+                                      r="1.5"
+                                      fill="#10B981"
+                                      stroke="#10B981"
+                                      strokeWidth="1"
+                                      className="hover:r-3 transition-all duration-200 cursor-pointer"
+                                    />
+                                  ))}
+                                </>
+                              );
+                            })()}
+                            
+                            {/* Gradient definition */}
+                            <defs>
+                              <linearGradient id="greenGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stopColor="#10B981" stopOpacity="0.8" />
+                                <stop offset="100%" stopColor="#10B981" stopOpacity="0.1" />
+                              </linearGradient>
+                            </defs>
+                          </>
+                        )}
+                      </svg>
+                      
+                      {/* Tooltip */}
+                      <div 
+                        id="carbon-tooltip" 
+                        className="absolute bg-zinc-900 text-white text-xs p-2 rounded shadow-lg z-10 pointer-events-none border border-zinc-600"
+                        style={{ display: 'none', transform: 'translate(-50%, -100%)' }}
+                      ></div>
+                      
+                      {/* Invisible hover areas for tooltips */}
+                      {forecastData.length > 0 && (() => {
+                        const minIntensity = Math.min(...forecastData.map(d => d.intensity));
+                        const maxIntensity = Math.max(...forecastData.map(d => d.intensity));
+                        const range = maxIntensity - minIntensity;
+                        const padding = range * 0.1;
+                        const effectiveMin = Math.max(0, minIntensity - padding);
+                        const effectiveMax = maxIntensity + padding;
+                        
+                        const scaleY = (value: number) => 
+                          100 - ((value - effectiveMin) / (effectiveMax - effectiveMin) * 100);
+                          
+                        return forecastData.map((data, index) => (
                           <div 
                             key={index}
                             className="absolute w-4 h-4 cursor-pointer"
                             style={{
                               left: `${(index / (forecastData.length - 1)) * 100}%`,
-                              top: `${100 - (data.intensity / 6)}%`,
+                              top: `${scaleY(data.intensity)}%`,
                               transform: 'translate(-50%, -50%)'
                             }}
                             onMouseOver={(e) => {
                               const tooltip = document.getElementById('carbon-tooltip');
                               if (tooltip) {
                                 const date = new Date(data.created_at);
-                                const formattedDate = date.toLocaleTimeString();
-                                tooltip.innerHTML = `${data.intensity} gCO<sub>2</sub>/kWh<br/>${formattedDate}`;
-                                
-                                // Get the position relative to the chart container
-                                const rect = e.currentTarget.getBoundingClientRect();
+                                const formattedDate = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                tooltip.innerHTML = `<div class="font-medium">${data.intensity} gCO<sub>2</sub>/kWh</div><div>${formattedDate}</div>`;
                                 
                                 // Position the tooltip above the data point
                                 tooltip.style.left = `${(index / (forecastData.length - 1)) * 100}%`;
-                                tooltip.style.top = `${100 - (data.intensity / 6) - 10}%`;
+                                tooltip.style.top = `${scaleY(data.intensity) - 10}%`;
                                 
                                 tooltip.style.display = 'block';
                               }
@@ -318,53 +404,52 @@ const CarbonFootprintDashboard = () => {
                               }
                             }}
                           />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-between text-xs text-zinc-400">
-                    {forecastData.length > 0 && (
-                      <>
-                        <span>{new Date(forecastData[forecastData.length - 1].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        <span>{forecastData.length > Math.floor(forecastData.length / 2) && 
-                          new Date(forecastData[Math.floor(forecastData.length / 2)].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        <span>{new Date(forecastData[0].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                      </>
-                    )}
-                    {forecastData.length === 0 && (
-                      <>
-                        <span>Now</span>
-                        <span>12h</span>
-                        <span>24h</span>
-                      </>
-                    )}
-                  </div>
+                        ));
+                      })()}
+                    </div>
+                  )}
                 </div>
-                
-                <div>
-                  <h3 className="font-medium mb-2 text-zinc-200 text-sm">Optimal Training Windows</h3>
-                  <div className="space-y-2">
-                    <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                      <div>
-                        <p className="font-medium text-xs text-zinc-200">Today, 3:00 AM - 7:00 AM</p>
-                        <p className="text-xs text-zinc-400">EU North (Stockholm)</p>
-                      </div>
-                      <div className="text-green-400 font-medium text-xs">115 gCO<sub>2</sub>/kWh</div>
-                    </div>
-                    
-                    <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                      <div>
-                        <p className="font-medium text-xs text-zinc-200">Tomorrow, 2:00 AM - 6:00 AM</p>
-                        <p className="text-xs text-zinc-400">US West (Oregon)</p>
-                      </div>
-                      <div className="text-green-400 font-medium text-xs">130 gCO<sub>2</sub>/kWh</div>
-                    </div>
-                  </div>
+                <div className="flex justify-between text-xs text-zinc-400">
+                  {forecastData.length > 0 && (
+                    <>
+                      <span>{new Date(forecastData[forecastData.length - 1].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      <span>{forecastData.length > Math.floor(forecastData.length / 2) && 
+                        new Date(forecastData[Math.floor(forecastData.length / 2)].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      <span>{new Date(forecastData[0].created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    </>
+                  )}
+                  {forecastData.length === 0 && (
+                    <>
+                      <span>Now</span>
+                      <span>12h</span>
+                      <span>24h</span>
+                    </>
+                  )}
                 </div>
               </div>
               
-            
+              <div>
+                <h3 className="font-medium mb-2 text-zinc-200 text-sm">Optimal Training Windows</h3>
+                <div className="space-y-2">
+                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                    <div>
+                      <p className="font-medium text-xs text-zinc-200">Today, 3:00 AM - 7:00 AM</p>
+                      <p className="text-xs text-zinc-400">EU North (Stockholm)</p>
+                    </div>
+                    <div className="text-green-400 font-medium text-xs">115 gCO<sub>2</sub>/kWh</div>
+                  </div>
+                  
+                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
+                    <div>
+                      <p className="font-medium text-xs text-zinc-200">Tomorrow, 2:00 AM - 6:00 AM</p>
+                      <p className="text-xs text-zinc-400">US West (Oregon)</p>
+                    </div>
+                    <div className="text-green-400 font-medium text-xs">130 gCO<sub>2</sub>/kWh</div>
+                  </div>
+                </div>
+              </div>
             </div>
+          </div>
         </div>
         
         {/* Side Panel - Always visible on desktop */}
