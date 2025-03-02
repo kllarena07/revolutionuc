@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence, animate } from 'framer-motion';
 import NotebookUploader from './NotebookUploader';
+import OpenAI from 'openai';
 
 // Import Leaflet only on client-side
 let L: any;
@@ -45,6 +46,12 @@ interface GeoJSONFeature {
     type: string;
     coordinates: any[];
   };
+}
+
+interface OptimalWindow {
+  timeFrame: string;
+  location: string;
+  intensity: number;
 }
 
 // Create a wrapper component for the map to handle the Leaflet-specific props
@@ -101,6 +108,14 @@ const MapWrapper = ({ children, selectedServer, isClientSide }: {
   );
 };
 
+// Initialize OpenAI client (moved outside the component to fix issue with apiKey access)
+const initOpenAI = () => {
+  return new OpenAI({
+    apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || "",
+    dangerouslyAllowBrowser: true // For client-side usage
+  });
+};
+
 const CarbonFootprintDashboard = () => {
   const [modelSize, setModelSize] = useState("medium");
   const [location, setLocation] = useState("europe");
@@ -123,6 +138,8 @@ const CarbonFootprintDashboard = () => {
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
 
   const [forecastData, setForecastData] = useState<ForecastData[]>([]);
+  const [optimalWindows, setOptimalWindows] = useState<OptimalWindow[]>([]);
+  const [isAnalyzingWindows, setIsAnalyzingWindows] = useState(false);
   
   // Create DefaultIcon only on client side
   const [defaultIcon, setDefaultIcon] = useState<any>(null);
@@ -633,6 +650,165 @@ const CarbonFootprintDashboard = () => {
       console.log(data);
     } catch (error) {
       console.error("Error calling OpenAI API:", error);
+    }
+  };
+
+  // Initialize OpenAI client
+  const openai = new OpenAI({
+    apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || "",
+    dangerouslyAllowBrowser: true // For client-side usage
+  });
+
+  // Add useEffect to analyze forecast data and determine optimal windows
+  useEffect(() => {
+    if (forecastData.length > 0) {
+      // Clear any existing timeout to implement debouncing
+      const timeoutId = setTimeout(() => {
+        setIsAnalyzingWindows(true); // Start showing loading animation immediately
+        determineOptimalTrainingWindows();
+      }, 300); // Small delay to debounce multiple rapid updates
+      
+      // Cleanup function to clear the timeout if forecastData changes again quickly
+      return () => clearTimeout(timeoutId);
+    }
+  }, [forecastData]); // Only depend on forecastData to trigger analysis
+
+  // Function to determine optimal training windows using OpenAI
+  const determineOptimalTrainingWindows = async () => {
+    if (forecastData.length === 0) return;
+    
+    // Loading state is now set in the useEffect
+    try {
+      const openai = initOpenAI();
+      if (!openai) {
+        throw new Error("OpenAI client initialization failed");
+      }
+      
+      // Show loading animation visually even for fast responses
+      await new Promise(resolve => setTimeout(resolve, 800)); 
+      
+      // Map forecast data ensuring types are correct
+      const mappedData = forecastData.map(item => {
+        return {
+          time: new Date(item.created_at).toLocaleString(),
+          region: item.region,
+          intensity: item.intensity
+        };
+      });
+      
+      const dataForAnalysis = JSON.stringify(mappedData);
+      
+      console.log(`Analyzing ${mappedData.length} data points for optimal windows...`);
+      
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are an AI specialized in analyzing carbon intensity data to find optimal low-carbon windows for AI model training."
+          },
+          {
+            role: "user",
+            content: `Analyze this carbon intensity forecast data and identify the 2 best time windows with lowest carbon intensity. Return ONLY a JSON array of objects with these properties: timeFrame (string formatted as "Today, H:MM AM - H:MM AM" or "Tomorrow, H:MM AM - H:MM AM"), location (string with region name), intensity (number in gCO2/kWh). Here's the data: ${dataForAnalysis}`
+          }
+        ],
+        response_format: { type: "json_object" }
+      });
+      
+      // Handle potential null content safely
+      const content = response.choices[0].message.content || "{}";
+      const result = JSON.parse(content);
+      
+      if (result && Array.isArray(result.windows)) {
+        console.log("✅ Found optimal windows:", result.windows);
+        setOptimalWindows(result.windows);
+      } else {
+        console.warn("⚠️ Unexpected response format from OpenAI:", result);
+        // Fall back to manually calculating optimal windows
+        fallbackToOptimalWindowCalculation();
+      }
+    } catch (error) {
+      console.error("Error analyzing forecast data with OpenAI:", error);
+      fallbackToOptimalWindowCalculation();
+    } finally {
+      // Set loading state back to false regardless of outcome
+      setIsAnalyzingWindows(false);
+    }
+  };
+  
+  // Separate function for calculating fallback optimal windows
+  const fallbackToOptimalWindowCalculation = () => {
+    if (forecastData.length === 0) return;
+    
+    // Group data by region
+    const dataByRegion: { [key: string]: ForecastData[] } = {};
+    forecastData.forEach(item => {
+      if (!dataByRegion[item.region]) {
+        dataByRegion[item.region] = [];
+      }
+      dataByRegion[item.region].push(item);
+    });
+    
+    // Find minimum intensity windows for each region
+    const bestWindows: OptimalWindow[] = [];
+    
+    Object.entries(dataByRegion).forEach(([region, data]) => {
+      if (data.length === 0) return;
+      
+      // Sort by intensity (lowest first)
+      const sortedData = [...data].sort((a, b) => a.intensity - b.intensity);
+      const bestTimePoint = sortedData[0];
+      
+      // Find matching server name for this region
+      const matchingServer = serverData.find(s => s.zone === region);
+      const locationName = matchingServer?.name || region;
+      
+      // Format time window (4 hour window starting from the best time)
+      const date = new Date(bestTimePoint.created_at);
+      const isToday = date.getDate() === new Date().getDate();
+      const hourStart = date.getHours();
+      const hourEnd = (hourStart + 4) % 24;
+      
+      const formatHour = (h: number) => {
+        const suffix = h >= 12 ? 'PM' : 'AM';
+        const hour = h % 12 || 12;
+        return `${hour}:00 ${suffix}`;
+      };
+      
+      const timeFrame = `${isToday ? 'Today' : 'Tomorrow'}, ${formatHour(hourStart)} - ${formatHour(hourEnd)}`;
+      
+      bestWindows.push({
+        timeFrame,
+        location: locationName,
+        intensity: bestTimePoint.intensity
+      });
+    });
+    
+    // Sort windows by intensity (lowest first) and take top 2
+    const topWindows = bestWindows
+      .sort((a, b) => a.intensity - b.intensity)
+      .slice(0, 2);
+    
+    if (topWindows.length > 0) {
+      console.log("✅ Calculated fallback optimal windows:", topWindows);
+      setOptimalWindows(topWindows);
+    } else {
+      // Last resort: create synthetic windows based on server data
+      const minIntensity = Math.min(...serverData.map(s => s.intensity));
+      const bestServer = serverData.find(s => s.intensity === minIntensity);
+      
+      setOptimalWindows([
+        {
+          timeFrame: "Today, 3:00 AM - 7:00 AM",
+          location: bestServer?.name || "EU North (Stockholm)",
+          intensity: minIntensity
+        },
+        {
+          timeFrame: "Tomorrow, 2:00 AM - 6:00 AM",
+          location: "US West (Oregon)",
+          intensity: minIntensity + 15
+        }
+      ]);
     }
   };
 
@@ -1211,41 +1387,69 @@ const CarbonFootprintDashboard = () => {
                   Optimal Training Windows
                 </h3>
                 <div className="space-y-2">
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
-                  >
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Today, 3:00 AM - 7:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">
-                        EU North (Stockholm)
-                      </p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      115 gCO<sub>2</sub>/kWh
-                    </div>
-                  </motion.div>
-
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: 0.1 }}
-                    className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
-                  >
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Tomorrow, 2:00 AM - 6:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">US West (Oregon)</p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      130 gCO<sub>2</sub>/kWh
-                    </div>
-                  </motion.div>
+                  {optimalWindows.length > 0 ? (
+                    optimalWindows.map((window, index) => (
+                      <motion.div 
+                        key={index}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: index * 0.1 }}
+                        className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center"
+                      >
+                        <div>
+                          <p className="font-medium text-xs text-zinc-200">
+                            {window.timeFrame}
+                          </p>
+                          <p className="text-xs text-zinc-400">
+                            {window.location}
+                          </p>
+                        </div>
+                        <div className="text-green-400 font-medium text-xs">
+                          {window.intensity} gCO<sub>2</sub>/kWh
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <motion.div 
+                      className="p-3 bg-zinc-800 border border-zinc-700 rounded-lg text-center"
+                      animate={{ 
+                        boxShadow: isAnalyzingWindows ? [
+                          "0 0 0 rgba(16, 185, 129, 0)",
+                          "0 0 8px rgba(16, 185, 129, 0.4)",
+                          "0 0 0 rgba(16, 185, 129, 0)"
+                        ] : "none"
+                      }}
+                      transition={{ 
+                        duration: 1.5, 
+                        repeat: isAnalyzingWindows ? Infinity : 0, 
+                        ease: "easeInOut" 
+                      }}
+                    >
+                      {isAnalyzingWindows ? (
+                        <div className="flex flex-col items-center">
+                          <motion.div 
+                            className="w-5 h-5 mb-2 border-2 border-t-green-500 border-green-500/20 rounded-full"
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                          />
+                          <p className="text-xs text-zinc-400 flex items-center">
+                            <motion.span
+                              animate={{ opacity: [0.6, 1, 0.6] }}
+                              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                            >
+                              Analyzing carbon data with AI
+                            </motion.span>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center">
+                          <p className="text-xs text-zinc-400">
+                            No optimal windows available
+                          </p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
                 </div>
               </div>
             </div>
