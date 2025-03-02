@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { motion, AnimatePresence } from "framer-motion";
 
 const MapContainer = dynamic(
   () => import("react-leaflet").then((mod) => mod.MapContainer),
@@ -129,7 +130,7 @@ const MapWrapper = ({
   );
 };
 
-const CarbonFootprintDashboard = () => {
+const CarbonFootprintDashboard = async () => {
   const [modelSize, setModelSize] = useState("medium");
   const [location, setLocation] = useState("europe");
   const [optimizations, setOptimizations] = useState<string[]>([
@@ -885,6 +886,15 @@ const CarbonFootprintDashboard = () => {
 
           const data = await response.json();
           console.log(data);
+
+          // Return the data into the Window component
+          return (
+            <Window
+              time={new Date(createdAt).toLocaleString()}
+              region={region}
+              result={intensity}
+            />
+          );
         } catch (error) {
           console.error("Error calling OpenAI API:", error);
         }
@@ -1532,31 +1542,17 @@ const CarbonFootprintDashboard = () => {
                 </h3>
 
                 <div className="space-y-2">
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Today, 3:00 AM - 7:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">
-                        EU North (Stockholm)
-                      </p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      115 gCO<sub>2</sub>/kWh
-                    </div>
-                  </div>
-
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Tomorrow, 2:00 AM - 6:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">US West (Oregon)</p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      130 gCO<sub>2</sub>/kWh
-                    </div>
-                  </div>
+                  {forecastData.length > 0 &&
+                    (await processCarbonDataAndCallOpenAI()) && (
+                      <Window
+                        key={new Date().getTime()}
+                        time={new Date().toLocaleString()}
+                        carbonIntensity={
+                          forecastData[forecastData.length - 1].intensity
+                        }
+                        onClose={() => setForecastData([])}
+                      />
+                    )}
                 </div>
               </div>
             </div>
