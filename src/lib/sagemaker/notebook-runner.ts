@@ -1,6 +1,6 @@
-import { S3Service } from './s3-service';
-import { SageMakerService } from './sagemaker-service';
-import { SageMakerConfig, NotebookRunResult } from './types';
+import { S3Service } from "./s3-service";
+import { SageMakerService } from "./sagemaker-service";
+import { SageMakerConfig, NotebookRunResult } from "./types";
 
 export class NotebookRunner {
   private s3Service: S3Service;
@@ -13,28 +13,36 @@ export class NotebookRunner {
     this.sageMakerService = new SageMakerService(config);
   }
 
-  async runNotebook(notebookContent: Buffer, fileName: string): Promise<NotebookRunResult> {
+  async runNotebook(
+    notebookContent: Buffer,
+    fileName: string
+  ): Promise<NotebookRunResult> {
     try {
       // Generate a unique notebook instance name
       const timestamp = new Date().getTime();
       const instanceName = `${this.config.notebookName}-${timestamp}`;
-      
+
       // 1. Upload the notebook to S3
-      const s3Key = await this.s3Service.uploadNotebook(notebookContent, fileName);
-      
+      const s3Key = await this.s3Service.uploadNotebook(
+        notebookContent,
+        fileName
+      );
+
       // 2. Create and start the notebook instance
       await this.sageMakerService.createNotebookInstance(instanceName);
-      
+
       // 3. Get the presigned URL to access the notebook
-      const notebookUrl = await this.sageMakerService.getNotebookUrl(instanceName);
-      
+      const notebookUrl = await this.sageMakerService.getNotebookUrl(
+        instanceName
+      );
+
       return {
         notebookUrl,
         instanceName,
-        s3Path: `s3://${this.config.s3BucketName}/${s3Key}`
+        s3Path: `s3://${this.config.s3BucketName}/${s3Key}`,
       };
     } catch (error) {
-      console.error('Error running notebook:', error);
+      console.error("Error running notebook:", error);
       throw error;
     }
   }
@@ -43,4 +51,3 @@ export class NotebookRunner {
     await this.sageMakerService.deleteNotebookInstance(instanceName);
   }
 }
-

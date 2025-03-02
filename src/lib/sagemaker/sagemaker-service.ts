@@ -14,7 +14,13 @@ export class SageMakerService {
   private config: SageMakerConfig;
 
   constructor(config: SageMakerConfig) {
-    this.client = new SageMakerClient({ region: config.region });
+    this.client = new SageMakerClient({
+      region: config.region,
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+      },
+    });
     this.config = config;
   }
 
@@ -25,7 +31,6 @@ export class SageMakerService {
         InstanceType: this.config
           .instanceType as CreateNotebookInstanceInput["InstanceType"],
         RoleArn: this.config.roleArn,
-        DefaultCodeRepository: `s3://${this.config.s3BucketName}`,
         DirectInternetAccess: "Enabled",
       })
     );
@@ -52,11 +57,11 @@ export class SageMakerService {
     } while (status !== "InService");
 
     // Start the notebook instance
-    await this.client.send(
-      new StartNotebookInstanceCommand({
-        NotebookInstanceName: notebookName,
-      })
-    );
+    // await this.client.send(
+    //   new StartNotebookInstanceCommand({
+    //     NotebookInstanceName: notebookName,
+    //   })
+    // );
   }
 
   async getNotebookUrl(notebookName: string): Promise<string> {
