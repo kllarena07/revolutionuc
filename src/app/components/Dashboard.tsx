@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence, animate } from 'framer-motion';
-
+import NotebookUploader from './NotebookUploader';
 
 // Import Leaflet only on client-side
 let L: any;
@@ -603,12 +603,17 @@ const CarbonFootprintDashboard = () => {
     setSelectedServer(server);
     fetchForecastForRegion(server.zone);
     setAnimatedIntensity(server.intensity);
+    // Hide the recommended server card after selection
+    setShowRecommendedServer(false);
   };
   
   // Find the greenest server
   const greenestServer = [...serverData].sort(
     (a, b) => a.intensity - b.intensity
   )[0];
+  
+  // State for showing/hiding recommended server card
+  const [showRecommendedServer, setShowRecommendedServer] = useState(true);
 
   //call the OpenAI API key
   const handleScheduleTraining = async () => {
@@ -763,16 +768,6 @@ const CarbonFootprintDashboard = () => {
 
             {/* Map Controls Overlay */}
             <div className="absolute top-4 right-4 z-[1000] flex space-x-2">
-              {/* <motion.div
-                className="bg-green-600 text-white px-3 py-1 rounded-md text-sm flex items-center shadow-lg"
-              >
-                <motion.span 
-                  className="inline-block w-2 h-2 rounded-full bg-white mr-2"
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 1, repeat: Infinity }}
-                />
-                Live Updates Enabled
-              </motion.div> */}
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -1609,26 +1604,50 @@ const CarbonFootprintDashboard = () => {
                         </motion.p>
                       </div>
                     </div>
+
+                                        {/* Integrated NotebookUploader */}
+                                        <div className="mt-3 border-t border-zinc-600 pt-2">
+                      <NotebookUploader compact={true} />
+                    </div>
                     <div className="mt-2">
-                      <button className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm">
+                      <button 
+                        className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded-md text-sm"
+                        onClick={handleScheduleTraining}
+                      >
                         Schedule Training on This Server
                       </button>
                     </div>
+                    
+
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Recommended server section */}
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
-                className="p-3 bg-zinc-700 rounded-lg mb-4"
-              >
-                <h3 className="font-medium mb-1 text-zinc-200">
-                  Recommended Server
-                </h3>
-                {greenestServer && (
+              {/* Recommended server section - now in sidebar */}
+              {showRecommendedServer && greenestServer && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.4 }}
+                  className="p-3 bg-zinc-700 rounded-lg mb-4"
+                >
+                  <h3 className="font-medium mb-1 text-zinc-200 flex items-center">
+                    <motion.div
+                      className="w-2 h-2 rounded-full bg-green-500 mr-1"
+                      animate={{ 
+                        scale: [1, 1.2, 1],
+                        opacity: [1, 0.8, 1]
+                      }}
+                      transition={{ 
+                        duration: 2,
+                        repeat: Infinity,
+                        repeatType: "reverse"
+                      }}
+                    />
+                    Recommended Server
+                  </h3>
+                  
                   <motion.div 
                     className="flex items-center justify-between"
                     initial={{ x: -10, opacity: 0 }}
@@ -1643,36 +1662,38 @@ const CarbonFootprintDashboard = () => {
                         {greenestServer.provider}
                       </p>
                     </div>
-                    <div className="flex items-center">
-                      <motion.div
-                        className={`w-3 h-3 rounded-full ${getIntensityColor(
-                          greenestServer.intensity
-                        )} mr-2`}
-                        animate={{ 
-                          scale: [1, 1.2, 1],
-                          opacity: [1, 0.8, 1]
-                        }}
-                        transition={{ 
-                          duration: 2,
-                          repeat: Infinity,
-                          repeatType: "reverse"
-                        }}
-                      ></motion.div>
-                      <span className="font-medium text-zinc-200">
-                        {greenestServer.intensity} gCO<sub>2</sub>/kWh
-                      </span>
+                    <div className="flex flex-col items-end">
+                      <div className="flex items-center">
+                        <motion.div
+                          className={`w-3 h-3 rounded-full ${getIntensityColor(
+                            greenestServer.intensity
+                          )} mr-2`}
+                          animate={{ 
+                            scale: [1, 1.2, 1],
+                            opacity: [1, 0.8, 1]
+                          }}
+                          transition={{ 
+                            duration: 2,
+                            repeat: Infinity,
+                            repeatType: "reverse"
+                          }}
+                        />
+                        <span className="font-medium text-zinc-200">
+                          {greenestServer.intensity} gCO<sub>2</sub>/kWh
+                        </span>
+                      </div>
+                      <motion.button 
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm mt-2"
+                        onClick={() => handleServerSelect(greenestServer)}
+                      >
+                        Select Server
+                      </motion.button>
                     </div>
-                    <motion.button 
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
-                      onClick={() => handleServerSelect(greenestServer)}
-                    >
-                      Select Server
-                    </motion.button>
                   </motion.div>
-                )}
-              </motion.div>
+                </motion.div>
+              )}
 
               <div className="overflow-hidden rounded-lg border border-zinc-700">
                 <table className="min-w-full divide-y divide-zinc-700">
@@ -1802,35 +1823,28 @@ const CarbonFootprintDashboard = () => {
             </div>
           )}
 
-          <div className="p-4 border-t border-zinc-700">
-            <motion.button 
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md relative overflow-hidden group"
-            >
-              <span className="relative z-10">Start Optimized Training</span>
-              <motion.div 
-                className="absolute inset-0 bg-green-500 opacity-0 group-hover:opacity-20"
-                animate={{ 
-                  x: ["-100%", "100%"]
-                }}
-                transition={{ 
-                  duration: 1.5, 
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-              />
-            </motion.button>
-            
-            {/* Add animated status text */}
-            <motion.p 
-              className="text-center text-xs text-zinc-500 mt-2"
-              animate={{ opacity: [0.5, 0.8, 0.5] }}
-              transition={{ duration: 4, repeat: Infinity, repeatType: "reverse" }}
-            >
-              System ready • {new Date().toLocaleDateString()} • v1.2.0
-            </motion.p>
-          </div>
+          {activeTab === "notebook" && (
+            <div className="p-4">
+              <h2 className="text-lg font-semibold mb-4 text-zinc-100 flex items-center">
+                <motion.div
+                  className="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"
+                  animate={{ 
+                    boxShadow: [
+                      "0 0 0 rgba(34, 197, 94, 0)",
+                      "0 0 0 rgba(34, 197, 94, 0.4)",
+                      "0 0 0 rgba(34, 197, 94, 0)"
+                    ]
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
+                Jupyter Notebook
+              </h2>
+              
+              <NotebookUploader />
+            </div>
+          )}
+
+          {/* Removed standalone "Run Training" section */}
         </div>
       </div>
 
