@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import Window from "./Window";
 
 const MapContainer = dynamic(
   () => import("react-leaflet").then((mod) => mod.MapContainer),
@@ -264,25 +265,60 @@ const CarbonFootprintDashboard = () => {
     (a, b) => a.intensity - b.intensity
   )[0];
 
-  //call the OpenAI API key
-  const handleScheduleTraining = async () => {
-    try {
-      const response = await fetch("/api/openai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          prompt: "Write a haiku about AI",
-        }),
-      });
+  const processCarbonDataAndCallOpenAI = async () => {
+    setIsLoading(true);
 
-      const data = await response.json();
-      console.log(data);
-    } catch (error) {
-      console.error("Error calling OpenAI API:", error);
-    }
+    // Simulate API delay
+    setTimeout(async () => {
+      try {
+        // Fetch real carbon intensity data from our API
+        const forecastResponse = await fetch("/api/history", {
+          headers: {
+            "x-region": "US-SW-PNM",
+          },
+        });
+        if (!forecastResponse.ok) {
+          throw new Error("Failed to fetch forecast data");
+        }
+        const forecastResult = await forecastResponse.json();
+
+        // Extract carbon data parameters
+        const { intensity, createdAt, region } =
+          extractCarbonDataParams(forecastResult);
+        console.log({ intensity, createdAt, region });
+
+        setForecastData(forecastResult);
+
+        // Call the OpenAI API with extracted parameters
+        try {
+          const response = await fetch("/api/openai", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              prompt: `Determine the time when the carbon intensity is lowest for ${
+                greenestServer.name
+              }, which currently has an intensity of ${
+                greenestServer.intensity
+              } gCO2/kWh as of ${new Date(
+                greenestServer.createdAt
+              ).toLocaleString()}.`,
+            }),
+          });
+
+          const data = await response.json();
+          console.log(data);
+        } catch (error) {
+          console.error("Error calling OpenAI API:", error);
+        }
+      } catch (error) {
+        console.error("Error fetching forecast data:", error);
+      }
+
+      setIsLoading(false);
+    }, 1000);
   };
 
   return (
@@ -381,7 +417,7 @@ const CarbonFootprintDashboard = () => {
               </h2>
               <button
                 className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm"
-                onClick={handleScheduleTraining}
+                onClick={processCarbonDataAndCallOpenAI}
               >
                 Schedule Training
               </button>
@@ -695,32 +731,10 @@ const CarbonFootprintDashboard = () => {
                 <h3 className="font-medium mb-2 text-zinc-200 text-sm">
                   Optimal Training Windows
                 </h3>
-                <div className="space-y-2">
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Today, 3:00 AM - 7:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">
-                        EU North (Stockholm)
-                      </p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      115 gCO<sub>2</sub>/kWh
-                    </div>
-                  </div>
 
-                  <div className="p-2 bg-green-900 border border-green-700 rounded-lg flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-xs text-zinc-200">
-                        Tomorrow, 2:00 AM - 6:00 AM
-                      </p>
-                      <p className="text-xs text-zinc-400">US West (Oregon)</p>
-                    </div>
-                    <div className="text-green-400 font-medium text-xs">
-                      130 gCO<sub>2</sub>/kWh
-                    </div>
-                  </div>
+                <div className="space-y-2">
+                  <Window time="10:00" region="US East" result="420" />
+                  <Window time="12:00" region="US West" result="320" />
                 </div>
               </div>
             </div>
@@ -1078,3 +1092,10 @@ const CarbonFootprintDashboard = () => {
 };
 
 export default CarbonFootprintDashboard;
+function extractCarbonDataParams(forecastResult: any): {
+  intensity: any;
+  createdAt: any;
+  region: any;
+} {
+  throw new Error("Function not implemented.");
+}

@@ -8,7 +8,13 @@ async function getCompletion() {
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: "write a haiku about AI" }],
+      messages: [
+        {
+          role: "user",
+          content:
+            "Determine the time frames of when the carbon footprint is the least present",
+        },
+      ],
     });
 
     console.log(completion.choices[0].message.content);
