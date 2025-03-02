@@ -4,78 +4,140 @@ import sys
 import traceback
 import nbformat
 from nbconvert.preprocessors import ExecutePreprocessor
+import subprocess
 
 # Configure paths
 input_dir = '/opt/ml/processing/input/notebook'
 output_dir = '/opt/ml/processing/output'
 os.makedirs(output_dir, exist_ok=True)
 
-# Set up logging
+# Set up local logging (stdout logs will be captured by CloudWatch)
 log_file = os.path.join(output_dir, 'execution_log.txt')
 
+# Set up Supabase client if environment variables are provided
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client, Client
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"Error initializing Supabase client: {e}", flush=True)
+        supabase = None
+else:
+    supabase = None
+
 def log_message(message):
-    print(message)
+    # Print to stdout (CloudWatch captures these)
+    print(message, flush=True)
+    # Append to local log file
     with open(log_file, 'a') as f:
         f.write(f"{message}\n")
+    # Insert into Supabase table if client is available
+    if supabase:
+        try:
+            # Insert a new record into the "execution_logs" table
+            # Adjust the payload as necessary to match your table schema.
+            response = supabase.table("execution_logs").insert({"message": message}).execute()
+        except Exception as e:
+            print(f"Error inserting log to Supabase: {e}", flush=True)
 
-log_message("Starting notebook execution")
+# Subclass ExecutePreprocessor to stream cell outputs as they occur
+class StreamingExecutePreprocessor(ExecutePreprocessor):
+    def preprocess_cell(self, cell, resources, index):
+        cell, resources = super().preprocess_cell(cell, resources, index)
+        if 'outputs' in cell:
+            for output in cell['outputs']:
+                if output.get('output_type') == 'stream':
+                    text = output.get('text', '')
+                    log_message(f"Cell {index} stream output: {text.strip()}")
+                elif output.get('output_type') == 'execute_result':
+                    data = output.get('data', {})
+                    text = data.get('text/plain', '')
+                    log_message(f"Cell {index} execute result: {text.strip()}")
+                elif output.get('output_type') == 'error':
+                    ename = output.get('ename', '')
+                    evalue = output.get('evalue', '')
+                    log_message(f"Cell {index} error: {ename} - {evalue}")
+        return cell, resources
 
-# Find the notebook file
-notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
-if not notebook_files:
-    log_message("No notebook files found in input directory")
-    sys.exit(1)
+log_message("Starting script execution")
 
-notebook_file = notebook_files[0]
-input_path = os.path.join(input_dir, notebook_file)
-log_message(f"Found notebook: {input_path}")
-
-try:
-    # Load the notebook
-    log_message("Loading notebook...")
-    with open(input_path) as f:
-        nb = nbformat.read(f, as_version=4)
-    
-    # Set up kernel spec
-    if 'metadata' not in nb:
-        nb['metadata'] = {}
-    nb['metadata']['kernelspec'] = {
-        'display_name': 'Python 3',
-        'language': 'python',
-        'name': 'python3'
-    }
-    
-    # Execute notebook
-    log_message("Executing notebook...")
-    ep = ExecutePreprocessor(timeout=1800, kernel_name='python3')
-    ep.preprocess(nb, {'metadata': {'path': '.'}})
-    
-    # Save executed notebook
-    output_notebook = os.path.join(output_dir, notebook_file)
-    with open(output_notebook, 'w', encoding='utf-8') as f:
-        nbformat.write(nb, f)
-    
-    log_message(f"Notebook execution completed successfully and saved to: {output_notebook}")
-    
-except Exception as e:
-    error_message = f"Error executing notebook: {str(e)}"
-    log_message(error_message)
-    
-    # Try to save the partial results
+# Check for a Python script (.py) in the input directory
+script_files = [f for f in os.listdir(input_dir) if f.endswith('.py')]
+if script_files:
+    script_file = script_files[0]
+    script_path = os.path.join(input_dir, script_file)
+    log_message(f"Found Python script: {script_path}")
     try:
-        output_notebook = os.path.join(output_dir, f"partial_{notebook_file}")
+        result = subprocess.run(['python', script_path], capture_output=True, text=True)
+        log_message("Script output:")
+        log_message(result.stdout)
+        if result.stderr:
+            log_message("Script errors:")
+            log_message(result.stderr)
+    except Exception as e:
+        log_message(f"Error executing script: {str(e)}")
+        sys.exit(1)
+else:
+    log_message("No Python script found. Falling back to notebook execution.")
+
+    # Find the notebook file
+    notebook_files = [f for f in os.listdir(input_dir) if f.endswith('.ipynb')]
+    if not notebook_files:
+        log_message("No notebook files found in input directory")
+        sys.exit(1)
+
+    notebook_file = notebook_files[0]
+    input_path = os.path.join(input_dir, notebook_file)
+    log_message(f"Found notebook: {input_path}")
+
+    try:
+        # Load the notebook
+        log_message("Loading notebook...")
+        with open(input_path) as f:
+            nb = nbformat.read(f, as_version=4)
+
+        # Set up kernel spec
+        if 'metadata' not in nb:
+            nb['metadata'] = {}
+        nb['metadata']['kernelspec'] = {
+            'display_name': 'Python 3',
+            'language': 'python',
+            'name': 'python3'
+        }
+
+        # Execute notebook using the streaming preprocessor
+        log_message("Executing notebook with streaming cell outputs...")
+        ep = StreamingExecutePreprocessor(timeout=1800, kernel_name='python3')
+        ep.preprocess(nb, {'metadata': {'path': '.'}})
+
+        # Save executed notebook
+        output_notebook = os.path.join(output_dir, notebook_file)
         with open(output_notebook, 'w', encoding='utf-8') as f:
             nbformat.write(nb, f)
-        log_message(f"Saved partial results to {output_notebook}")
-    except Exception as save_error:
-        log_message(f"Could not save partial results: {str(save_error)}")
-    
-    # Create detailed error log
-    error_log = os.path.join(output_dir, 'error_details.txt')
-    with open(error_log, 'w') as f:
-        f.write(traceback.format_exc())
-    
-    sys.exit(1)
+
+        log_message(f"Notebook execution completed successfully and saved to: {output_notebook}")
+
+    except Exception as e:
+        error_message = f"Error executing notebook: {str(e)}"
+        log_message(error_message)
+
+        # Try to save the partial results
+        try:
+            output_notebook = os.path.join(output_dir, f"partial_{notebook_file}")
+            with open(output_notebook, 'w', encoding='utf-8') as f:
+                nbformat.write(nb, f)
+            log_message(f"Saved partial results to {output_notebook}")
+        except Exception as save_error:
+            log_message(f"Could not save partial results: {str(save_error)}")
+
+        # Create detailed error log
+        error_log = os.path.join(output_dir, 'error_details.txt')
+        with open(error_log, 'w') as f:
+            f.write(traceback.format_exc())
+
+        sys.exit(1)
 
 # Create additional diagnostics for debugging
 log_message("Creating diagnostics...")
@@ -93,7 +155,6 @@ except Exception as e:
 
 # Save package list
 try:
-    import subprocess
     packages_file = os.path.join(output_dir, 'packages.txt')
     with open(packages_file, 'w') as f:
         f.write("Installed Python packages:\n")
@@ -103,13 +164,16 @@ try:
 except Exception as e:
     log_message(f"Error saving package list: {str(e)}")
 
-# Save notebook metadata
+# Save notebook metadata (if available)
 try:
     meta_file = os.path.join(output_dir, 'notebook_metadata.txt')
     with open(meta_file, 'w') as f:
         f.write("Notebook metadata:\n")
-        for key, value in nb.get('metadata', {}).items():
-            f.write(f"{key}: {value}\n")
+        try:
+            for key, value in nb.get('metadata', {}).items():
+                f.write(f"{key}: {value}\n")
+        except Exception:
+            f.write("No notebook metadata available.\n")
     log_message("Notebook metadata saved")
 except Exception as e:
     log_message(f"Error saving notebook metadata: {str(e)}")
