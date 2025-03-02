@@ -111,7 +111,11 @@ const CarbonFootprintDashboard = () => {
       // Fetch real carbon intensity data from our API
       try {
         // Get forecast data from our history API
-        const forecastResponse = await fetch('/api/history');
+        const forecastResponse = await fetch('/api/history', {
+          headers: {
+            'x-region': 'US-SW-PNM'
+          }
+        });
         if (!forecastResponse.ok) {
           throw new Error('Failed to fetch forecast data');
         }
